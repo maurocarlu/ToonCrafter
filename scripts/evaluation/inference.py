@@ -1,3 +1,24 @@
+# Prima cosa, definiamo e chiamiamo il patch per CLIP
+def patch_open_clip_embedding():
+    """Applica monkey patch per ottimizzare l'embedding CLIP"""
+    import open_clip
+    import gc
+    
+    original_init = open_clip.tokenizer.SimpleTokenizer.__init__
+    
+    def new_init(self, *args, **kwargs):
+        print("Ottimizzazione del caricamento tokenizer CLIP...")
+        gc.collect()
+        torch.cuda.empty_cache()
+        original_init(self, *args, **kwargs)
+    
+    open_clip.tokenizer.SimpleTokenizer.__init__ = new_init
+
+# Chiama questa funzione all'inizio
+import torch
+patch_open_clip_embedding()
+
+# Resto degli import
 import argparse, os, sys, glob
 import datetime, time
 from omegaconf import OmegaConf
@@ -5,16 +26,12 @@ from tqdm import tqdm
 from einops import rearrange, repeat
 from collections import OrderedDict
 
-import torch
 import torchvision
 import torchvision.transforms as transforms
 from pytorch_lightning import seed_everything
 from PIL import Image
-# Aggiungiamo import per SafeTensors e Accelerate
+# Aggiungiamo import per SafeTensors
 from safetensors.torch import load_file as safe_load
-from accelerate import Accelerator
-from accelerate.utils import set_seed
-import deepspeed
 
 sys.path.insert(1, os.path.join(sys.path[0], '..', '..'))
 from lvdm.models.samplers.ddim import DDIMSampler
@@ -309,16 +326,9 @@ def run_inference(args):
     ## set use_checkpoint as False as when using deepspeed, it encounters an error "deepspeed backend not set"
     model_config['params']['unet_config']['params']['use_checkpoint'] = False
     
-    # Importante: configura per caricare direttamente in metà precisione
-    model_config['params']['cond_stage_config']['params']['device'] = device
-    
     # Inizializzazione del modello
     print("Inizializzazione del modello...")
     model = instantiate_from_config(model_config)
-    
-    # Carica il checkpoint
-    print(f"Caricamento del checkpoint da {args.ckpt_path}")
-    assert os.path.exists(args.ckpt_path), "Error: checkpoint Not Found!"
     
     # Carica il checkpoint direttamente in half precision
     model = model.half()
@@ -344,28 +354,14 @@ def run_inference(args):
     os.makedirs(fakedir, exist_ok=True)
     os.makedirs(fakedir_separate, exist_ok=True)
     
-    # Continua con il codice originale, adattato per una singola GPU
     ## prompt file setting
     assert os.path.exists(args.prompt_dir), "Error: prompt file Not Found!"
     filename_list, data_list, prompt_list = load_data_prompts(args.prompt_dir, video_size=(args.height, args.width), video_frames=n_frames, interp=args.interp)
     num_samples = len(prompt_list)
     
-    # Divisione dei campioni tra processi
-    samples_split = (num_samples + num_processes - 1) // num_processes  # Ceiling division
-    start_idx = samples_split * process_index
-    end_idx = min(samples_split * (process_index + 1), num_samples)
+    print(f'Prompts testing: {num_samples} samples loaded.')
     
-    print(f'Prompts testing [rank:{process_index}] {end_idx-start_idx}/{num_samples} samples loaded.')
-    
-    indices = list(range(start_idx, end_idx))
-    prompt_list_rank = [prompt_list[i] for i in indices if i < num_samples]
-    data_list_rank = [data_list[i] for i in indices if i < num_samples]
-    filename_list_rank = [filename_list[i] for i in indices if i < num_samples]
-
     start = time.time()
-    
-    # Sincronizza i processi prima di iniziare l'inferenza
-    accelerator.wait_for_everyone()
     
     with torch.no_grad():
         for idx, indice in tqdm(enumerate(range(0, len(prompt_list), args.bs)), desc='Sample Batch'):
@@ -402,10 +398,7 @@ def run_inference(args):
             del videos, batch_samples
             torch.cuda.empty_cache()
 
-    # Assicura che tutti i processi abbiano terminato prima di stampare il riepilogo
-    accelerator.wait_for_everyone()
-    if is_main_process:
-        print(f"Saved in {args.savedir}. Total time used: {(time.time() - start):.2f} seconds")
+    print(f"Saved in {args.savedir}. Total time used: {(time.time() - start):.2f} seconds")
 
 
 def get_parser():
@@ -446,22 +439,3 @@ if __name__ == '__main__':
     
     seed_everything(args.seed)
     run_inference(args)
-
-def patch_open_clip_embedding():
-    """Applica monkey patch per ottimizzare l'embedding CLIP"""
-    import open_clip
-    from transformers import CLIPTextModel, CLIPTokenizer
-    
-    original_init = open_clip.tokenizer.SimpleTokenizer.__init__
-    
-    def new_init(self, *args, **kwargs):
-        print("Ottimizzazione del caricamento tokenizer CLIP...")
-        import gc
-        gc.collect()
-        torch.cuda.empty_cache()
-        original_init(self, *args, **kwargs)
-    
-    open_clip.tokenizer.SimpleTokenizer.__init__ = new_init
-
-# Chiama questa funzione all'inizio dello script prima di importare il modello
-patch_open_clip_embedding()
