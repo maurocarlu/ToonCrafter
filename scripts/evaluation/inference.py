@@ -26,7 +26,7 @@ def get_filelist(data_dir, postfixes):
     file_list.sort()
     return file_list
 
-def load_model_checkpoint(model, ckpt):
+def load_model_checkpoint(model, ckpt, strict=False):
     # Verifica se il file è in formato safetensors
     is_safetensors = ckpt.endswith('.safetensors')
     
@@ -38,7 +38,7 @@ def load_model_checkpoint(model, ckpt):
     if "state_dict" in list(state_dict.keys()):
         state_dict = state_dict["state_dict"]
         try:
-            model.load_state_dict(state_dict, strict=True)
+            model.load_state_dict(state_dict, strict=strict)
         except:
             ## rename the keys for 256x256 model
             new_pl_sd = OrderedDict()
@@ -50,7 +50,7 @@ def load_model_checkpoint(model, ckpt):
                     new_key = k.replace("framestride_embed", "fps_embedding")
                     new_pl_sd[new_key] = new_pl_sd[k]
                     del new_pl_sd[k]
-            model.load_state_dict(new_pl_sd, strict=True)
+            model.load_state_dict(new_pl_sd, strict=strict)
     else:
         # deepspeed o file safetensors senza wrapper state_dict
         new_pl_sd = OrderedDict()
@@ -59,7 +59,7 @@ def load_model_checkpoint(model, ckpt):
                 new_pl_sd[key[16:]]=state_dict['module'][key]
         else:  # dizionario di stato diretto (tipico del formato safetensors)
             new_pl_sd = state_dict
-        model.load_state_dict(new_pl_sd)
+        model.load_state_dict(new_pl_sd, strict=strict)
     
     print(f'>>> model checkpoint loaded from {ckpt}')
     return model
@@ -301,7 +301,7 @@ def run_inference(args, gpu_num, gpu_no):
     model = model.cuda(gpu_no)
     model.perframe_ae = args.perframe_ae
     assert os.path.exists(args.ckpt_path), "Error: checkpoint Not Found!"
-    model = load_model_checkpoint(model, args.ckpt_path)
+    model = load_model_checkpoint(model, args.ckpt_path, strict=False)
     model.eval()
 
     ## run over data

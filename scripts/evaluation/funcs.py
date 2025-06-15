@@ -112,7 +112,7 @@ def get_dirlist(path):
     return list
 
 
-def load_model_checkpoint(model, ckpt):
+def load_model_checkpoint(model, ckpt, strict=False):
     def load_checkpoint(model, ckpt, full_strict):
         # Verifica se il file è in formato safetensors
         is_safetensors = ckpt.endswith('.safetensors')
@@ -150,7 +150,7 @@ def load_model_checkpoint(model, ckpt):
 
         return model
         
-    load_checkpoint(model, ckpt, full_strict=True)
+    load_checkpoint(model, ckpt, full_strict=strict)
     print(f'>>> model checkpoint loaded from {ckpt}')
     return model
 
