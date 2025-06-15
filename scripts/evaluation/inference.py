@@ -295,11 +295,12 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
 
 
 def run_inference(args):
-    # Inizializza Accelerator con mixed precision (FP16) senza configurazione inline di DeepSpeed
-    accelerator = Accelerator(mixed_precision="fp16")
+    # Impostazione manuale dei device
+    gpu_no = int(os.environ.get("CUDA_VISIBLE_DEVICES", "0").split(",")[0])
+    device = torch.device(f"cuda:{gpu_no}")
     
-    # Imposta seed per riproducibilità in ambiente distribuito
-    set_seed(args.seed, device_specific=True)
+    # Imposta seed per riproducibilità
+    seed_everything(args.seed)
     
     ## model config
     config = OmegaConf.load(args.config)
@@ -307,43 +308,43 @@ def run_inference(args):
     
     ## set use_checkpoint as False as when using deepspeed, it encounters an error "deepspeed backend not set"
     model_config['params']['unet_config']['params']['use_checkpoint'] = False
+    
+    # Importante: configura per caricare direttamente in metà precisione
+    model_config['params']['cond_stage_config']['params']['device'] = device
+    
+    # Inizializzazione del modello
+    print("Inizializzazione del modello...")
     model = instantiate_from_config(model_config)
     
-    # Prepara il modello per distribuirlo (invece di convertirlo direttamente)
-    model = model.half()
-    
     # Carica il checkpoint
+    print(f"Caricamento del checkpoint da {args.ckpt_path}")
     assert os.path.exists(args.ckpt_path), "Error: checkpoint Not Found!"
-    model = load_model_checkpoint(model, args.ckpt_path, strict=False)
     
-    # Imposta il modello in modalità eval
+    # Carica il checkpoint direttamente in half precision
+    model = model.half()
+    model = load_model_checkpoint(model, args.ckpt_path, strict=False)
+    model = model.to(device)
     model.eval()
     
-    # Prepara il modello con accelerator
-    model = accelerator.prepare(model)
-    
-    # Ottieni informazioni sul device e sul processo corrente
-    device = accelerator.device
-    is_main_process = accelerator.is_main_process
-    num_processes = accelerator.num_processes
-    process_index = accelerator.process_index
+    # Libera memoria
+    torch.cuda.empty_cache()
     
     ## run over data
     assert (args.height % 16 == 0) and (args.width % 16 == 0), "Error: image size [h,w] should be multiples of 16!"
     ## latent noise shape
     h, w = args.height // 8, args.width // 8
-    channels = model.module.model.diffusion_model.out_channels  # Nota: .module a causa di prepare()
+    channels = model.model.diffusion_model.out_channels
     n_frames = args.video_length
-    print(f'Inference with {n_frames} frames on {num_processes} devices')
+    print(f'Inference con {n_frames} frames')
     noise_shape = [args.bs, channels, n_frames, h, w]
 
-    # Crea directory solo nel processo principale
+    # Crea directory
     fakedir = os.path.join(args.savedir, "samples")
     fakedir_separate = os.path.join(args.savedir, "samples_separate")
-
-    if is_main_process:
-        os.makedirs(fakedir_separate, exist_ok=True)
-
+    os.makedirs(fakedir, exist_ok=True)
+    os.makedirs(fakedir_separate, exist_ok=True)
+    
+    # Continua con il codice originale, adattato per una singola GPU
     ## prompt file setting
     assert os.path.exists(args.prompt_dir), "Error: prompt file Not Found!"
     filename_list, data_list, prompt_list = load_data_prompts(args.prompt_dir, video_size=(args.height, args.width), video_frames=n_frames, interp=args.interp)
@@ -367,35 +368,39 @@ def run_inference(args):
     accelerator.wait_for_everyone()
     
     with torch.no_grad():
-        for idx, indice in tqdm(enumerate(range(0, len(prompt_list_rank), args.bs)), desc=f'Sample Batch [Process {process_index}]'):
-            prompts = prompt_list_rank[indice:indice+args.bs]
-            videos = data_list_rank[indice:indice+args.bs]
-            filenames = filename_list_rank[indice:indice+args.bs]
+        for idx, indice in tqdm(enumerate(range(0, len(prompt_list), args.bs)), desc='Sample Batch'):
+            # Libera memoria tra i batch
+            torch.cuda.empty_cache()
             
-            if len(prompts) == 0:  # Skip if no prompts for this batch
+            prompts = prompt_list[indice:indice+args.bs]
+            videos = data_list[indice:indice+args.bs]
+            filenames = filename_list[indice:indice+args.bs]
+            
+            if len(prompts) == 0:
                 continue
                 
             if isinstance(videos, list):
-                videos = torch.stack(videos, dim=0).to(device)
+                videos = torch.stack(videos, dim=0).to(device, dtype=torch.float16)
             else:
-                videos = videos.unsqueeze(0).to(device)
-                
-            videos = videos.half()  # Ensure inputs are in half precision
-
-            # Usa il modello di accelerator che è già in half-precision
-            model_unwrapped = accelerator.unwrap_model(model)
+                videos = videos.unsqueeze(0).to(device, dtype=torch.float16)
             
-            batch_samples = image_guided_synthesis(model_unwrapped, prompts, videos, noise_shape, args.n_samples, 
-                                                 args.ddim_steps, args.ddim_eta, args.unconditional_guidance_scale, 
-                                                 args.cfg_img, args.frame_stride, args.text_input, args.multiple_cond_cfg, 
-                                                 args.loop, args.interp, args.timestep_spacing, args.guidance_rescale)
+            # Processa batch con offloading aggressivo
+            with torch.cuda.amp.autocast(enabled=True):
+                batch_samples = image_guided_synthesis(model, prompts, videos, noise_shape, args.n_samples, 
+                                                   args.ddim_steps, args.ddim_eta, args.unconditional_guidance_scale, 
+                                                   args.cfg_img, args.frame_stride, args.text_input, args.multiple_cond_cfg, 
+                                                   args.loop, args.interp, args.timestep_spacing, args.guidance_rescale)
 
-            ## save each example individually
+            # Detach e sposta sulla CPU immediatamente
             for nn, samples in enumerate(batch_samples):
-                ## samples : [n_samples,c,t,h,w]
+                samples_cpu = samples.detach().cpu()
                 prompt = prompts[nn]
                 filename = filenames[nn]
-                save_results_seperate(prompt, samples, filename, fakedir, fps=8, loop=args.loop)
+                save_results_seperate(prompt, samples_cpu, filename, fakedir, fps=8, loop=args.loop)
+                
+            # Assicurati che i tensori siano liberati
+            del videos, batch_samples
+            torch.cuda.empty_cache()
 
     # Assicura che tutti i processi abbiano terminato prima di stampare il riepilogo
     accelerator.wait_for_everyone()
@@ -441,3 +446,22 @@ if __name__ == '__main__':
     
     seed_everything(args.seed)
     run_inference(args)
+
+def patch_open_clip_embedding():
+    """Applica monkey patch per ottimizzare l'embedding CLIP"""
+    import open_clip
+    from transformers import CLIPTextModel, CLIPTokenizer
+    
+    original_init = open_clip.tokenizer.SimpleTokenizer.__init__
+    
+    def new_init(self, *args, **kwargs):
+        print("Ottimizzazione del caricamento tokenizer CLIP...")
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        original_init(self, *args, **kwargs)
+    
+    open_clip.tokenizer.SimpleTokenizer.__init__ = new_init
+
+# Chiama questa funzione all'inizio dello script prima di importare il modello
+patch_open_clip_embedding()

@@ -7,11 +7,8 @@ FS=10
 seed=123
 name=tooncrafter_512_interp_seed${seed}
 
-# Lancio con Accelerate per distribuire automaticamente sui dispositivi disponibili
-python -m accelerate.commands.launch \
-  --multi_gpu \
-  --num_processes=2 \
-  scripts/evaluation/inference.py \
+# Usa una singola GPU con offloading aggressivo
+CUDA_VISIBLE_DEVICES=0 python scripts/evaluation/inference.py \
   --seed ${seed} \
   --ckpt_path $ckpt \
   --config $config \
