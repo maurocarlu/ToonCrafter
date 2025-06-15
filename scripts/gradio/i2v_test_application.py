@@ -48,7 +48,7 @@ class Image2Video():
         if steps > 60:
             steps = 60 
         model = self.model_list[gpu_id]
-        model = model.cuda()
+        model = model.half().cuda()
         batch_size=1
         channels = model.model.diffusion_model.out_channels
         frames = model.temporal_length
@@ -60,7 +60,7 @@ class Image2Video():
             text_emb = model.get_learned_conditioning([prompt])
 
             # img cond
-            img_tensor = torch.from_numpy(image).permute(2, 0, 1).float().to(model.device)
+            img_tensor = torch.from_numpy(image).permute(2, 0, 1).float().half().to(model.device)
             img_tensor = (img_tensor / 255. - 0.5) * 2
 
             image_tensor_resized = transform(img_tensor) #3,h,w
@@ -72,7 +72,7 @@ class Image2Video():
             
 
 
-            img_tensor2 = torch.from_numpy(image2).permute(2, 0, 1).float().to(model.device)
+            img_tensor2 = torch.from_numpy(image2).permute(2, 0, 1).float().half().to(model.device)
             img_tensor2 = (img_tensor2 / 255. - 0.5) * 2
             image_tensor_resized2 = transform(img_tensor2) #3,h,w
             videos2 = image_tensor_resized2.unsqueeze(0).unsqueeze(2) # bchw

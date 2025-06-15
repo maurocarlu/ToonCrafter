@@ -298,7 +298,7 @@ def run_inference(args, gpu_num, gpu_no):
     ## set use_checkpoint as False as when using deepspeed, it encounters an error "deepspeed backend not set"
     model_config['params']['unet_config']['params']['use_checkpoint'] = False
     model = instantiate_from_config(model_config)
-    model = model.cuda(gpu_no)
+    model = model.half().cuda(gpu_no)
     model.perframe_ae = args.perframe_ae
     assert os.path.exists(args.ckpt_path), "Error: checkpoint Not Found!"
     model = load_model_checkpoint(model, args.ckpt_path, strict=False)
@@ -342,6 +342,9 @@ def run_inference(args, gpu_num, gpu_no):
                 videos = torch.stack(videos, dim=0).to("cuda")
             else:
                 videos = videos.unsqueeze(0).to("cuda")
+                
+            model = model.half()  # Convert model to half precision
+            videos = videos.half()  # Ensure inputs are also in half precision
 
             batch_samples = image_guided_synthesis(model, prompts, videos, noise_shape, args.n_samples, args.ddim_steps, args.ddim_eta, \
                                 args.unconditional_guidance_scale, args.cfg_img, args.frame_stride, args.text_input, args.multiple_cond_cfg, args.loop, args.interp, args.timestep_spacing, args.guidance_rescale)
