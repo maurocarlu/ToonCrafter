@@ -295,28 +295,8 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
 
 
 def run_inference(args):
-    # Inizializza Accelerator con DeepSpeed
-    deepspeed_config = {
-        "fp16": {
-            "enabled": True
-        },
-        "zero_optimization": {
-            "stage": 2,
-            "offload_optimizer": {
-                "device": "cpu"
-            },
-            "contiguous_gradients": True,
-            "overlap_comm": True
-        },
-        "gradient_accumulation_steps": 1,
-        "gradient_clipping": 1.0,
-        "train_micro_batch_size_per_gpu": args.bs
-    }
-    
-    accelerator = Accelerator(
-        mixed_precision="fp16",
-        deepspeed_config=deepspeed_config
-    )
+    # Inizializza Accelerator con mixed precision (FP16) senza configurazione inline di DeepSpeed
+    accelerator = Accelerator(mixed_precision="fp16")
     
     # Imposta seed per riproducibilità in ambiente distribuito
     set_seed(args.seed, device_specific=True)
@@ -329,7 +309,7 @@ def run_inference(args):
     model_config['params']['unet_config']['params']['use_checkpoint'] = False
     model = instantiate_from_config(model_config)
     
-    # Prepara il modello per DeepSpeed (invece di convertirlo direttamente)
+    # Prepara il modello per distribuirlo (invece di convertirlo direttamente)
     model = model.half()
     
     # Carica il checkpoint
