@@ -10,8 +10,12 @@ import torchvision
 import torchvision.transforms as transforms
 from pytorch_lightning import seed_everything
 from PIL import Image
-# Aggiungiamo import per SafeTensors
+# Aggiungiamo import per SafeTensors e Accelerate
 from safetensors.torch import load_file as safe_load
+from accelerate import Accelerator
+from accelerate.utils import set_seed
+import deepspeed
+
 sys.path.insert(1, os.path.join(sys.path[0], '..', '..'))
 from lvdm.models.samplers.ddim import DDIMSampler
 from lvdm.models.samplers.ddim_multiplecond import DDIMSampler as DDIMSampler_multicond
@@ -290,7 +294,33 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
     return batch_variants.permute(1, 0, 2, 3, 4, 5)
 
 
-def run_inference(args, gpu_num, gpu_no):
+def run_inference(args):
+    # Inizializza Accelerator con DeepSpeed
+    deepspeed_config = {
+        "fp16": {
+            "enabled": True
+        },
+        "zero_optimization": {
+            "stage": 2,
+            "offload_optimizer": {
+                "device": "cpu"
+            },
+            "contiguous_gradients": True,
+            "overlap_comm": True
+        },
+        "gradient_accumulation_steps": 1,
+        "gradient_clipping": 1.0,
+        "train_micro_batch_size_per_gpu": args.bs
+    }
+    
+    accelerator = Accelerator(
+        mixed_precision="fp16",
+        deepspeed_config=deepspeed_config
+    )
+    
+    # Imposta seed per riproducibilità in ambiente distribuito
+    set_seed(args.seed, device_specific=True)
+    
     ## model config
     config = OmegaConf.load(args.config)
     model_config = config.pop("model", OmegaConf.create())
@@ -298,66 +328,99 @@ def run_inference(args, gpu_num, gpu_no):
     ## set use_checkpoint as False as when using deepspeed, it encounters an error "deepspeed backend not set"
     model_config['params']['unet_config']['params']['use_checkpoint'] = False
     model = instantiate_from_config(model_config)
-    model = model.half().cuda(gpu_no)
-    model.perframe_ae = args.perframe_ae
+    
+    # Prepara il modello per DeepSpeed (invece di convertirlo direttamente)
+    model = model.half()
+    
+    # Carica il checkpoint
     assert os.path.exists(args.ckpt_path), "Error: checkpoint Not Found!"
     model = load_model_checkpoint(model, args.ckpt_path, strict=False)
+    
+    # Imposta il modello in modalità eval
     model.eval()
-
+    
+    # Prepara il modello con accelerator
+    model = accelerator.prepare(model)
+    
+    # Ottieni informazioni sul device e sul processo corrente
+    device = accelerator.device
+    is_main_process = accelerator.is_main_process
+    num_processes = accelerator.num_processes
+    process_index = accelerator.process_index
+    
     ## run over data
     assert (args.height % 16 == 0) and (args.width % 16 == 0), "Error: image size [h,w] should be multiples of 16!"
-    assert args.bs == 1, "Current implementation only support [batch size = 1]!"
     ## latent noise shape
     h, w = args.height // 8, args.width // 8
-    channels = model.model.diffusion_model.out_channels
+    channels = model.module.model.diffusion_model.out_channels  # Nota: .module a causa di prepare()
     n_frames = args.video_length
-    print(f'Inference with {n_frames} frames')
+    print(f'Inference with {n_frames} frames on {num_processes} devices')
     noise_shape = [args.bs, channels, n_frames, h, w]
 
+    # Crea directory solo nel processo principale
     fakedir = os.path.join(args.savedir, "samples")
     fakedir_separate = os.path.join(args.savedir, "samples_separate")
 
-    # os.makedirs(fakedir, exist_ok=True)
-    os.makedirs(fakedir_separate, exist_ok=True)
+    if is_main_process:
+        os.makedirs(fakedir_separate, exist_ok=True)
 
     ## prompt file setting
     assert os.path.exists(args.prompt_dir), "Error: prompt file Not Found!"
     filename_list, data_list, prompt_list = load_data_prompts(args.prompt_dir, video_size=(args.height, args.width), video_frames=n_frames, interp=args.interp)
     num_samples = len(prompt_list)
-    samples_split = num_samples // gpu_num
-    print('Prompts testing [rank:%d] %d/%d samples loaded.'%(gpu_no, samples_split, num_samples))
-    #indices = random.choices(list(range(0, num_samples)), k=samples_per_device)
-    indices = list(range(samples_split*gpu_no, samples_split*(gpu_no+1)))
-    prompt_list_rank = [prompt_list[i] for i in indices]
-    data_list_rank = [data_list[i] for i in indices]
-    filename_list_rank = [filename_list[i] for i in indices]
+    
+    # Divisione dei campioni tra processi
+    samples_split = (num_samples + num_processes - 1) // num_processes  # Ceiling division
+    start_idx = samples_split * process_index
+    end_idx = min(samples_split * (process_index + 1), num_samples)
+    
+    print(f'Prompts testing [rank:{process_index}] {end_idx-start_idx}/{num_samples} samples loaded.')
+    
+    indices = list(range(start_idx, end_idx))
+    prompt_list_rank = [prompt_list[i] for i in indices if i < num_samples]
+    data_list_rank = [data_list[i] for i in indices if i < num_samples]
+    filename_list_rank = [filename_list[i] for i in indices if i < num_samples]
 
     start = time.time()
-    with torch.no_grad(), torch.cuda.amp.autocast():
-        for idx, indice in tqdm(enumerate(range(0, len(prompt_list_rank), args.bs)), desc='Sample Batch'):
+    
+    # Sincronizza i processi prima di iniziare l'inferenza
+    accelerator.wait_for_everyone()
+    
+    with torch.no_grad():
+        for idx, indice in tqdm(enumerate(range(0, len(prompt_list_rank), args.bs)), desc=f'Sample Batch [Process {process_index}]'):
             prompts = prompt_list_rank[indice:indice+args.bs]
             videos = data_list_rank[indice:indice+args.bs]
             filenames = filename_list_rank[indice:indice+args.bs]
-            if isinstance(videos, list):
-                videos = torch.stack(videos, dim=0).to("cuda")
-            else:
-                videos = videos.unsqueeze(0).to("cuda")
+            
+            if len(prompts) == 0:  # Skip if no prompts for this batch
+                continue
                 
-            model = model.half()  # Convert model to half precision
-            videos = videos.half()  # Ensure inputs are also in half precision
+            if isinstance(videos, list):
+                videos = torch.stack(videos, dim=0).to(device)
+            else:
+                videos = videos.unsqueeze(0).to(device)
+                
+            videos = videos.half()  # Ensure inputs are in half precision
 
-            batch_samples = image_guided_synthesis(model, prompts, videos, noise_shape, args.n_samples, args.ddim_steps, args.ddim_eta, \
-                                args.unconditional_guidance_scale, args.cfg_img, args.frame_stride, args.text_input, args.multiple_cond_cfg, args.loop, args.interp, args.timestep_spacing, args.guidance_rescale)
+            # Usa il modello di accelerator che è già in half-precision
+            model_unwrapped = accelerator.unwrap_model(model)
+            
+            batch_samples = image_guided_synthesis(model_unwrapped, prompts, videos, noise_shape, args.n_samples, 
+                                                 args.ddim_steps, args.ddim_eta, args.unconditional_guidance_scale, 
+                                                 args.cfg_img, args.frame_stride, args.text_input, args.multiple_cond_cfg, 
+                                                 args.loop, args.interp, args.timestep_spacing, args.guidance_rescale)
 
             ## save each example individually
             for nn, samples in enumerate(batch_samples):
                 ## samples : [n_samples,c,t,h,w]
                 prompt = prompts[nn]
                 filename = filenames[nn]
-                # save_results(prompt, samples, filename, fakedir, fps=8, loop=args.loop)
                 save_results_seperate(prompt, samples, filename, fakedir, fps=8, loop=args.loop)
 
-    print(f"Saved in {args.savedir}. Time used: {(time.time() - start):.2f} seconds")
+    # Assicura che tutti i processi abbiano terminato prima di stampare il riepilogo
+    accelerator.wait_for_everyone()
+    if is_main_process:
+        print(f"Saved in {args.savedir}. Total time used: {(time.time() - start):.2f} seconds")
 
 
 def get_parser():
@@ -397,5 +460,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     seed_everything(args.seed)
-    rank, gpu_num = 0, 1
-    run_inference(args, gpu_num, rank)
+    run_inference(args)
