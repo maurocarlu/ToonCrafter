@@ -5,6 +5,8 @@ mainlogger = logging.getLogger('mainlogger')
 
 import torch
 from collections import OrderedDict
+# Aggiungiamo import per SafeTensors
+from safetensors.torch import load_file as safe_load
 
 def init_workspace(name, logdir, model_config, lightning_config, rank=0):
     workdir = os.path.join(logdir, name)
@@ -141,18 +143,30 @@ def load_checkpoints(model, model_cfg):
         assert os.path.exists(pretrained_ckpt), "Error: Pre-trained checkpoint NOT found at:%s"%pretrained_ckpt
         mainlogger.info(">>> Load weights from pretrained checkpoint")
 
-        pl_sd = torch.load(pretrained_ckpt, map_location="cpu")
+        # Verifica se il file è in formato safetensors
+        is_safetensors = pretrained_ckpt.endswith('.safetensors')
+        
+        if is_safetensors:
+            pl_sd = safe_load(pretrained_ckpt)
+            mainlogger.info(f">>> Loading SafeTensors checkpoint from {pretrained_ckpt}")
+        else:
+            pl_sd = torch.load(pretrained_ckpt, map_location="cpu")
+        
         try:
             if 'state_dict' in pl_sd.keys():
                 model.load_state_dict(pl_sd["state_dict"], strict=True)
                 mainlogger.info(">>> Loaded weights from pretrained checkpoint: %s"%pretrained_ckpt)
             else:
-                # deepspeed
+                # deepspeed o file safetensors senza wrapper state_dict
                 new_pl_sd = OrderedDict()
-                for key in pl_sd['module'].keys():
-                    new_pl_sd[key[16:]]=pl_sd['module'][key]
+                if 'module' in pl_sd:  # formato deepspeed
+                    for key in pl_sd['module'].keys():
+                        new_pl_sd[key[16:]]=pl_sd['module'][key]
+                else:  # dizionario di stato diretto (tipico del formato safetensors)
+                    new_pl_sd = pl_sd
                 model.load_state_dict(new_pl_sd, strict=True)
-        except:
+        except Exception as e:
+            mainlogger.warning(f"Fallback loading: {e}")
             model.load_state_dict(pl_sd)
     else:
         mainlogger.info(">>> Start training from scratch")

@@ -10,6 +10,8 @@ import torchvision
 import torchvision.transforms as transforms
 from pytorch_lightning import seed_everything
 from PIL import Image
+# Aggiungiamo import per SafeTensors
+from safetensors.torch import load_file as safe_load
 sys.path.insert(1, os.path.join(sys.path[0], '..', '..'))
 from lvdm.models.samplers.ddim import DDIMSampler
 from lvdm.models.samplers.ddim_multiplecond import DDIMSampler as DDIMSampler_multicond
@@ -25,7 +27,14 @@ def get_filelist(data_dir, postfixes):
     return file_list
 
 def load_model_checkpoint(model, ckpt):
-    state_dict = torch.load(ckpt, map_location="cpu")
+    # Verifica se il file è in formato safetensors
+    is_safetensors = ckpt.endswith('.safetensors')
+    
+    if is_safetensors:
+        state_dict = safe_load(ckpt)
+    else:
+        state_dict = torch.load(ckpt, map_location="cpu")
+    
     if "state_dict" in list(state_dict.keys()):
         state_dict = state_dict["state_dict"]
         try:
@@ -43,12 +52,16 @@ def load_model_checkpoint(model, ckpt):
                     del new_pl_sd[k]
             model.load_state_dict(new_pl_sd, strict=True)
     else:
-        # deepspeed
+        # deepspeed o file safetensors senza wrapper state_dict
         new_pl_sd = OrderedDict()
-        for key in state_dict['module'].keys():
-            new_pl_sd[key[16:]]=state_dict['module'][key]
+        if 'module' in state_dict:  # formato deepspeed
+            for key in state_dict['module'].keys():
+                new_pl_sd[key[16:]]=state_dict['module'][key]
+        else:  # dizionario di stato diretto (tipico del formato safetensors)
+            new_pl_sd = state_dict
         model.load_state_dict(new_pl_sd)
-    print('>>> model checkpoint loaded.')
+    
+    print(f'>>> model checkpoint loaded from {ckpt}')
     return model
 
 def load_prompts(prompt_file):
