@@ -359,3 +359,12 @@ if __name__ == "__main__":
         else:
             print("\n❌ Processo fallito!")
             sys.exit(1)
+
+# Funzioni di compatibilità per il notebook
+def run_manga_conversion(prompt_dir, output_dir, config_type='dramatic_change'):
+    """Funzione helper per compatibilità con il notebook"""
+    runner = ColabMangaToonCrafterRunner("/content/ToonCrafter")
+    return runner.run_inference(prompt_dir, output_dir, config_type)
+
+# Alias per compatibilità con il notebook
+MangaToonCrafterRunner = ColabMangaToonCrafterRunner

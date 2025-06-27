@@ -12,7 +12,7 @@ import yaml
 from pathlib import Path
 import shutil
 
-class MangaToonCrafterRunner:
+class AdvancedToonCrafterRunner:
     """
     Runner ottimizzato per ToonCrafter specifico per panel manga
     """
