@@ -35,44 +35,60 @@ class ColabMangaToonCrafterRunner:
         """
         return {
             'smooth_transition': {
-                'frame_stride': 12,
-                'ddim_steps': 60,
-                'unconditional_guidance_scale': 8.5,
-                'guidance_rescale': 0.7,
-                'video_length': 16,
-                'description': 'Per transizioni fluide tra panel simili'
-            },
-            'dramatic_change': {
-                'frame_stride': 18,
-                'ddim_steps': 80,
-                'unconditional_guidance_scale': 12.0,
-                'guidance_rescale': 0.9,
-                'video_length': 20,
-                'description': 'Per cambi drastici di scena/inquadratura (RACCOMANDATO per manga)'
-            },
-            'action_sequence': {
-                'frame_stride': 15,
-                'ddim_steps': 70,
-                'unconditional_guidance_scale': 10.0,
-                'guidance_rescale': 0.8,
-                'video_length': 24,
-                'description': 'Per sequenze d\'azione dinamiche'
-            },
-            'dialogue_scene': {
                 'frame_stride': 8,
                 'ddim_steps': 50,
-                'unconditional_guidance_scale': 7.0,
+                'unconditional_guidance_scale': 7.5,
+                'guidance_rescale': 0.7,
+                'video_length': 16,
+                'description': 'Per transizioni fluide tra panel simili - MIGLIORE per manga coerenti'
+            },
+            'dramatic_change': {
+                'frame_stride': 12,
+                'ddim_steps': 60,
+                'unconditional_guidance_scale': 9.0,
+                'guidance_rescale': 0.8,
+                'video_length': 16,
+                'description': 'Per cambi drastici di scena/inquadratura (AGGIORNATO per migliore qualità)'
+            },
+            'manga_stable': {
+                'frame_stride': 6,
+                'ddim_steps': 40,
+                'unconditional_guidance_scale': 6.5,
                 'guidance_rescale': 0.6,
                 'video_length': 12,
-                'description': 'Per scene di dialogo con movimenti sottili'
+                'description': 'NUOVO: Ottimizzato per panel manga - più stabile e coerente'
+            },
+            'character_focus': {
+                'frame_stride': 5,
+                'ddim_steps': 35,
+                'unconditional_guidance_scale': 5.5,
+                'guidance_rescale': 0.5,
+                'video_length': 10,
+                'description': 'NUOVO: Per scene con focus su personaggi - riduce confusione'
+            },
+            'action_sequence': {
+                'frame_stride': 10,
+                'ddim_steps': 45,
+                'unconditional_guidance_scale': 8.0,
+                'guidance_rescale': 0.7,
+                'video_length': 18,
+                'description': 'Per sequenze d\'azione dinamiche - parametri più conservativi'
+            },
+            'dialogue_scene': {
+                'frame_stride': 4,
+                'ddim_steps': 30,
+                'unconditional_guidance_scale': 5.0,
+                'guidance_rescale': 0.4,
+                'video_length': 10,
+                'description': 'Per scene di dialogo con movimenti sottili - molto stabile'
             },
             'colab_fast': {
-                'frame_stride': 10,
-                'ddim_steps': 40,
-                'unconditional_guidance_scale': 8.0,
-                'guidance_rescale': 0.6,
-                'video_length': 12,
-                'description': 'Configurazione veloce per test su Colab'
+                'frame_stride': 6,
+                'ddim_steps': 25,
+                'unconditional_guidance_scale': 6.0,
+                'guidance_rescale': 0.5,
+                'video_length': 8,
+                'description': 'Configurazione veloce per test su Colab - migliorata per qualità'
             }
         }
     
@@ -142,17 +158,243 @@ class ColabMangaToonCrafterRunner:
             )
             print(f"🎛️ VRAM limitata al {self.colab_optimizations['max_memory_usage']*100}%")
     
+    def analyze_manga_sequences(self, prompt_dir: str):
+        """
+        Analizza ogni sequenza manga individualmente e suggerisce configurazioni specifiche
+        """
+        print("🔍 ANALISI INTELLIGENTE PER SEQUENZA")
+        print("=" * 50)
+        
+        # Trova le coppie di immagini e ordinale per garantire consistenza
+        image_files = []
+        for ext in ['*.png', '*.jpg', '*.jpeg']:
+            image_files.extend(Path(prompt_dir).glob(ext))
+        
+        frame_pairs = []
+        for img_path in image_files:
+            if '_frame1' in img_path.name:
+                base_name = img_path.name.split('_frame1')[0]
+                frame3_path = Path(prompt_dir) / f"{base_name}_frame3.png"
+                if frame3_path.exists():
+                    frame_pairs.append((img_path, frame3_path, base_name))
+        
+        # Ordina le coppie per nome per garantire corrispondenza con prompts.txt
+        frame_pairs.sort(key=lambda x: x[2].lower())  # Ordina per base_name
+        
+        # Carica i prompt
+        prompts_file = os.path.join(prompt_dir, "prompts.txt")
+        prompts = []
+        if os.path.exists(prompts_file):
+            with open(prompts_file, 'r', encoding='utf-8') as f:
+                prompts = [line.strip() for line in f.readlines() if line.strip()]
+        
+        # Analizza ogni sequenza
+        sequence_configs = []
+        
+        for i, (f1, f3, base_name) in enumerate(frame_pairs):
+            print(f"\n📋 SEQUENZA {i+1}: {base_name}")
+            print(f"   📸 {f1.name} → {f3.name}")
+            
+            # Prompt associato
+            prompt = prompts[i] if i < len(prompts) else "default animation"
+            print(f"   📝 Prompt: \"{prompt}\"")
+            
+            # Analisi per nome base (riconoscimento serie)
+            base_lower = base_name.lower()
+            prompt_lower = prompt.lower()
+            
+            suggested_config = 'manga_stable'  # Default
+            confidence = 0.5
+            reason = "Configurazione sicura di default"
+            
+            # === ANALISI SPECIFICA PER SERIE CONOSCIUTE ===
+            if 'piece' in base_lower or 'luffy' in base_lower or 'rufy' in base_lower:
+                # One Piece - spesso scene dinamiche o zoom su personaggi
+                if any(word in prompt_lower for word in ['flag', 'determination', 'close-up', 'character', 'holding']):
+                    suggested_config = 'character_focus'
+                    confidence = 0.95
+                    reason = "One Piece + elemento caratteristico rilevato (flag/determinazione)"
+                elif any(word in prompt_lower for word in ['action', 'dynamic', 'battle', 'fight']):
+                    suggested_config = 'action_sequence'
+                    confidence = 0.9
+                    reason = "One Piece + azione dinamica rilevata"
+                else:
+                    suggested_config = 'character_focus'
+                    confidence = 0.85
+                    reason = "One Piece - ottimizzato per focus su personaggio"
+                    
+            elif 'slam' in base_lower or 'dunk' in base_lower:
+                # Slam Dunk - spesso dialoghi e interazioni
+                if any(word in prompt_lower for word in ['dialogue', 'interaction', 'basketball', 'players', 'conversation', 'gentle']):
+                    suggested_config = 'dialogue_scene'
+                    confidence = 0.95
+                    reason = "Slam Dunk + dialogo/interazione basket rilevato"
+                elif any(word in prompt_lower for word in ['sport', 'game', 'court', 'match']):
+                    suggested_config = 'action_sequence'
+                    confidence = 0.85
+                    reason = "Slam Dunk + scena sportiva"
+                else:
+                    suggested_config = 'character_focus'
+                    confidence = 0.8
+                    reason = "Slam Dunk - focus su personaggi"
+            
+            elif 'gon' in base_lower:
+                # Hunter x Hunter - trasformazioni e energia
+                if any(word in prompt_lower for word in ['transformation', 'energy', 'power', 'dynamic']):
+                    suggested_config = 'action_sequence'
+                    confidence = 0.9
+                    reason = "Gon + trasformazione/energia rilevata"
+                else:
+                    suggested_config = 'character_focus'
+                    confidence = 0.85
+                    reason = "Gon - focus su sviluppo personaggio"
+            
+            # === ANALISI GENERICA BASATA SU PROMPT ===
+            else:
+                if any(word in prompt_lower for word in ['close-up', 'face', 'character', 'portrait', 'holding', 'determination']):
+                    suggested_config = 'character_focus'
+                    confidence = 0.85
+                    reason = "Focus su personaggio rilevato nel prompt"
+                elif any(word in prompt_lower for word in ['dialogue', 'conversation', 'interaction', 'gentle', 'players']):
+                    suggested_config = 'dialogue_scene'
+                    confidence = 0.85
+                    reason = "Scena di dialogo rilevata nel prompt"
+                elif any(word in prompt_lower for word in ['action', 'dynamic', 'battle', 'fast', 'energy']):
+                    suggested_config = 'action_sequence'
+                    confidence = 0.8
+                    reason = "Azione dinamica rilevata nel prompt"
+                elif any(word in prompt_lower for word in ['smooth', 'gentle', 'transition', 'movement']):
+                    suggested_config = 'smooth_transition'
+                    confidence = 0.8
+                    reason = "Transizione fluida rilevata nel prompt"
+            
+            sequence_configs.append({
+                'base_name': base_name,
+                'config': suggested_config,
+                'confidence': confidence,
+                'reason': reason,
+                'prompt': prompt
+            })
+            
+            print(f"   🎛️ Config suggerita: {suggested_config}")
+            print(f"   📊 Confidenza: {confidence:.1%}")
+            print(f"   💡 Motivo: {reason}")
+        
+        return sequence_configs
+
+    def run_inference_per_sequence(self, prompt_dir: str, output_dir: str, 
+                                 sequence_configs: list = None,
+                                 show_progress: bool = True):
+        """
+        Esegue l'inferenza con configurazioni diverse per ogni sequenza
+        """
+        if not self.check_colab_environment():
+            return False
+        
+        self.optimize_for_colab()
+        
+        # Analizza sequenze se non fornite
+        if sequence_configs is None:
+            sequence_configs = self.analyze_manga_sequences(prompt_dir)
+        
+        print(f"\n🎬 CONVERSIONE MULTI-CONFIGURAZIONE")
+        print("=" * 50)
+        
+        all_success = True
+        generated_videos = []
+        
+        for i, seq_config in enumerate(sequence_configs):
+            base_name = seq_config['base_name']
+            config_type = seq_config['config']
+            
+            print(f"\n� SEQUENZA {i+1}/{len(sequence_configs)}: {base_name}")
+            print(f"🎛️ Configurazione: {config_type}")
+            print(f"📝 Prompt: \"{seq_config['prompt']}\"")
+            
+            # Crea directory temporanea per questa sequenza
+            seq_prompt_dir = f"{prompt_dir}_seq_{i+1}"
+            seq_output_dir = f"{output_dir}/{base_name}"
+            
+            os.makedirs(seq_prompt_dir, exist_ok=True)
+            os.makedirs(seq_output_dir, exist_ok=True)
+            
+            try:
+                # Copia solo i file per questa sequenza
+                frame1_src = Path(prompt_dir) / f"{base_name}_frame1.png"
+                frame3_src = Path(prompt_dir) / f"{base_name}_frame3.png"
+                
+                if frame1_src.exists() and frame3_src.exists():
+                    import shutil
+                    shutil.copy(frame1_src, f"{seq_prompt_dir}/{base_name}_frame1.png")
+                    shutil.copy(frame3_src, f"{seq_prompt_dir}/{base_name}_frame3.png")
+                    
+                    # Crea prompts.txt specifico per questa sequenza
+                    with open(f"{seq_prompt_dir}/prompts.txt", 'w', encoding='utf-8') as f:
+                        f.write(seq_config['prompt'])
+                    
+                    # Esegui conversione con configurazione specifica
+                    success = self.run_inference_colab(
+                        seq_prompt_dir, seq_output_dir, config_type, 
+                        show_progress=show_progress, auto_analyze=False
+                    )
+                    
+                    if success:
+                        # Trova video generati per questa sequenza
+                        import glob
+                        videos = glob.glob(f"{seq_output_dir}/**/*.mp4", recursive=True)
+                        generated_videos.extend(videos)
+                        
+                        print(f"✅ Sequenza {base_name} completata!")
+                        for video in videos:
+                            print(f"   📹 {os.path.basename(video)}")
+                    else:
+                        print(f"❌ Errore nella sequenza {base_name}")
+                        all_success = False
+                    
+                    # Pulizia directory temporanea
+                    shutil.rmtree(seq_prompt_dir, ignore_errors=True)
+                    
+                else:
+                    print(f"❌ File mancanti per {base_name}")
+                    all_success = False
+                    
+            except Exception as e:
+                print(f"❌ Errore nella sequenza {base_name}: {e}")
+                all_success = False
+        
+        if all_success:
+            print(f"\n🎉 TUTTE LE SEQUENZE COMPLETATE!")
+            print(f"� Video totali generati: {len(generated_videos)}")
+            
+            # Salva lista per download
+            globals()['GENERATED_VIDEOS'] = generated_videos
+            globals()['MULTI_CONFIG_SUCCESS'] = True
+            
+        return all_success
+
     def run_inference_colab(self, prompt_dir: str, output_dir: str, 
                            config_type: str = 'dramatic_change',
-                           show_progress: bool = True):
+                           show_progress: bool = True,
+                           auto_analyze: bool = True):
         """
-        Esegue l'inferenza ToonCrafter ottimizzata per Colab
+        Esegue l'inferenza ToonCrafter ottimizzata per Colab con analisi intelligente
         """
         if not self.check_colab_environment():
             return False
         
         # Applica ottimizzazioni Colab
         self.optimize_for_colab()
+        
+        # Analisi intelligente del contenuto se richiesta
+        if auto_analyze:
+            suggested_config, confidence = self.analyze_manga_content(prompt_dir)
+            
+            if confidence > 0.7:
+                print(f"\n🤖 CONSIGLIO: Uso configurazione suggerita '{suggested_config}' (confidenza: {confidence:.1%})")
+                config_type = suggested_config
+            elif confidence > 0.5:
+                print(f"\n💡 SUGGERIMENTO: Considera di usare '{suggested_config}' (confidenza: {confidence:.1%})")
+                print(f"🔧 Configurazione attuale: '{config_type}' - vuoi continuare con questa?")
         
         if config_type not in self.configs:
             raise ValueError(f"Tipo di config non valido: {config_type}")
@@ -181,7 +423,7 @@ class ColabMangaToonCrafterRunner:
         # Crea directory di output
         os.makedirs(output_dir, exist_ok=True)
         
-        # Comando per ToonCrafter con ottimizzazioni Colab
+        # Comando per ToonCrafter con ottimizzazioni Colab e qualità migliorata
         cmd = [
             "python", str(inference_script),
             "--config", str(base_config),
@@ -197,11 +439,13 @@ class ColabMangaToonCrafterRunner:
             "--width", "512",
             "--n_samples", "1",
             "--bs", "1",
-            "--seed", "123",
+            "--seed", "42",  # Seed più stabile
             "--text_input",
             "--interp",
             "--perframe_ae",  # Importante per memoria GPU limitata
-            "--ddim_eta", "1.0"
+            "--ddim_eta", "0.8",  # Ridotto per meno rumore
+            "--decode_frame_bs", "1",  # Decodifica frame singoli per stabilità
+            "--timestep_spacing", "uniform",  # Distribuzione uniforme per transizioni più fluide
         ]
         
         print(f"🚀 Avvio ToonCrafter con configurazione: {config_type}")
@@ -306,25 +550,50 @@ def run_with_config(tooncrafter_path: str, prompt_dir: str, output_dir: str,
 
 def list_configs():
     """
-    Mostra tutte le configurazioni disponibili
+    Mostra tutte le configurazioni disponibili con raccomandazioni aggiornate
     """
     runner = ColabMangaToonCrafterRunner(".")  # Path dummy
     
-    print("🎛️ Configurazioni ottimizzate per Google Colab:")
-    print("=" * 60)
+    print("🎛️ Configurazioni ottimizzate per Google Colab (AGGIORNATE):")
+    print("=" * 70)
     
-    for name, config in runner.configs.items():
-        print(f"\n📋 {name.upper()}:")
-        print(f"   {config['description']}")
-        print("   Parametri:")
-        for key, value in config.items():
-            if key != 'description':
-                print(f"     • {key}: {value}")
+    # Ordina per raccomandazione
+    recommended_order = [
+        'manga_stable', 'character_focus', 'dialogue_scene', 
+        'smooth_transition', 'dramatic_change', 'action_sequence', 'colab_fast'
+    ]
     
-    print("\n💡 Raccomandazioni:")
-    print("   • dramatic_change: Migliore per panel manga con grandi differenze")
-    print("   • colab_fast: Per test veloci su Colab")
-    print("   • smooth_transition: Per panel molto simili")
+    for name in recommended_order:
+        if name in runner.configs:
+            config = runner.configs[name]
+            
+            # Indica le configurazioni nuove/migliorate
+            if name in ['manga_stable', 'character_focus']:
+                status = "🆕 NUOVO"
+            elif name in ['dramatic_change', 'colab_fast']:
+                status = "🔧 MIGLIORATO"
+            else:
+                status = "✅ STANDARD"
+            
+            print(f"\n📋 {name.upper()} {status}:")
+            print(f"   {config['description']}")
+            print("   Parametri:")
+            for key, value in config.items():
+                if key != 'description':
+                    print(f"     • {key}: {value}")
+    
+    print("\n💡 RACCOMANDAZIONI AGGIORNATE (per problemi di qualità):")
+    print("   🎯 manga_stable: MIGLIOR SCELTA per la maggior parte dei manga")
+    print("   👤 character_focus: Per zoom su volti/personaggi (es. One Piece)")
+    print("   💬 dialogue_scene: Per interazioni/dialoghi (es. Slam Dunk)")
+    print("   🎬 smooth_transition: Per panel molto simili")
+    print("   ⚡ colab_fast: Solo per test veloci")
+    
+    print("\n🔧 PROBLEMI RISOLTI:")
+    print("   ❌ Video confusi → Parametri più conservativi")
+    print("   ❌ Scene vuote → Frame stride ridotto") 
+    print("   ❌ Troppo rumore → Guidance scale più basso")
+    print("   ❌ Instabilità → Video più corti e stabili")
 
 
 if __name__ == "__main__":
@@ -361,10 +630,35 @@ if __name__ == "__main__":
             sys.exit(1)
 
 # Funzioni di compatibilità per il notebook
-def run_manga_conversion(prompt_dir, output_dir, config_type='dramatic_change'):
-    """Funzione helper per compatibilità con il notebook"""
+def run_manga_conversion(prompt_dir, output_dir, config_type='manga_stable'):
+    """
+    Funzione helper per compatibilità con il notebook - ora con analisi intelligente
+    """
     runner = ColabMangaToonCrafterRunner("/content/ToonCrafter")
-    return runner.run_inference_colab(prompt_dir, output_dir, config_type)
+    
+    # Analisi intelligente e suggerimenti
+    suggested_config, confidence = runner.analyze_manga_content(prompt_dir)
+    
+    # Se la configurazione predefinita è 'dramatic_change' e abbiamo un suggerimento migliore
+    if config_type == 'dramatic_change' and confidence > 0.6:
+        print(f"\n🤖 OVERRIDE INTELLIGENTE: Cambio da '{config_type}' a '{suggested_config}'")
+        print(f"📈 Confidenza: {confidence:.1%} - dovrebbe dare risultati migliori!")
+        config_type = suggested_config
+    
+    return runner.run_inference_colab(prompt_dir, output_dir, config_type, auto_analyze=False)
+
+def run_manga_conversion_smart(prompt_dir, output_dir, config_type='auto'):
+    """
+    Versione avanzata con selezione automatica della configurazione migliore
+    """
+    runner = ColabMangaToonCrafterRunner("/content/ToonCrafter")
+    
+    if config_type == 'auto':
+        suggested_config, confidence = runner.analyze_manga_content(prompt_dir)
+        print(f"\n🎯 MODALITÀ AUTO: Selezionata '{suggested_config}' (confidenza: {confidence:.1%})")
+        config_type = suggested_config
+    
+    return runner.run_inference_colab(prompt_dir, output_dir, config_type, auto_analyze=True)
 
 # Alias per compatibilità con il notebook
 MangaToonCrafterRunner = ColabMangaToonCrafterRunner
