@@ -544,6 +544,75 @@ class ColabMangaToonCrafterRunner:
             except:
                 pass
 
+    def run_single_sequence_conversion(self, base_name: str, prompt: str, config_type: str, 
+                                     output_dir: str, input_dir: str):
+        """
+        Esegue la conversione per una singola sequenza con configurazione specifica
+        
+        Args:
+            base_name: Nome base della sequenza (es. "one_piece", "slam_dunk")
+            prompt: Prompt specifico per questa sequenza
+            config_type: Tipo di configurazione da usare
+            output_dir: Directory di output per questa sequenza
+            input_dir: Directory contenente le immagini di input
+        
+        Returns:
+            bool: True se la conversione è riuscita, False altrimenti
+        """
+        print(f"🎬 Conversione sequenza: {base_name}")
+        print(f"📝 Prompt: {prompt}")
+        print(f"🎛️ Config: {config_type}")
+        
+        try:
+            # Crea directory temporanea per questa sequenza specifica
+            import tempfile
+            import shutil
+            
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_input_dir = os.path.join(temp_dir, "input")
+                os.makedirs(temp_input_dir, exist_ok=True)
+                
+                # Copia solo i file di questa sequenza specifica
+                frame1_file = f"{base_name}_frame1.png"
+                frame3_file = f"{base_name}_frame3.png"
+                
+                frame1_src = os.path.join(input_dir, frame1_file)
+                frame3_src = os.path.join(input_dir, frame3_file)
+                
+                if not (os.path.exists(frame1_src) and os.path.exists(frame3_src)):
+                    print(f"❌ File mancanti per {base_name}")
+                    return False
+                
+                # Copia i file
+                shutil.copy2(frame1_src, os.path.join(temp_input_dir, frame1_file))
+                shutil.copy2(frame3_src, os.path.join(temp_input_dir, frame3_file))
+                
+                # Crea file prompt temporaneo
+                temp_prompt_file = os.path.join(temp_input_dir, "prompts.txt")
+                with open(temp_prompt_file, 'w', encoding='utf-8') as f:
+                    f.write(prompt + "\n")
+                
+                print(f"📁 File preparati in: {temp_input_dir}")
+                
+                # Esegui la conversione
+                success = self.run_inference_colab(
+                    temp_input_dir, 
+                    output_dir, 
+                    config_type, 
+                    auto_analyze=False
+                )
+                
+                if success:
+                    print(f"✅ Conversione {base_name} completata!")
+                    return True
+                else:
+                    print(f"❌ Conversione {base_name} fallita!")
+                    return False
+                    
+        except Exception as e:
+            print(f"❌ Errore durante conversione {base_name}: {e}")
+            return False
+
 
 def run_with_config(tooncrafter_path: str, prompt_dir: str, output_dir: str, 
                    config_type: str = 'dramatic_change'):
