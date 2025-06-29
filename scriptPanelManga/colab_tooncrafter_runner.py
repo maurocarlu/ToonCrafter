@@ -387,7 +387,14 @@ class ColabMangaToonCrafterRunner:
         
         # Analisi intelligente del contenuto se richiesta
         if auto_analyze:
-            suggested_config, confidence = self.analyze_manga_content(prompt_dir)
+            # Analisi intelligente automatica
+            sequence_configs = self.analyze_manga_sequences(prompt_dir)
+            if sequence_configs:
+                # Usa la configurazione della prima sequenza come default
+                suggested_config = sequence_configs[0]['config']
+                confidence = sequence_configs[0]['confidence']
+            else:
+                suggested_config, confidence = 'manga_stable', 0.5
             
             if confidence > 0.7:
                 print(f"\n🤖 CONSIGLIO: Uso configurazione suggerita '{suggested_config}' (confidenza: {confidence:.1%})")
@@ -636,8 +643,14 @@ def run_manga_conversion(prompt_dir, output_dir, config_type='manga_stable'):
     """
     runner = ColabMangaToonCrafterRunner("/content/ToonCrafter")
     
-    # Analisi intelligente e suggerimenti
-    suggested_config, confidence = runner.analyze_manga_content(prompt_dir)
+    # Analisi intelligente automatica
+    sequence_configs = runner.analyze_manga_sequences(prompt_dir)
+    if sequence_configs:
+        # Usa la configurazione della prima sequenza come default
+        suggested_config = sequence_configs[0]['config']
+        confidence = sequence_configs[0]['confidence']
+    else:
+        suggested_config, confidence = 'manga_stable', 0.5
     
     # Se la configurazione predefinita è 'dramatic_change' e abbiamo un suggerimento migliore
     if config_type == 'dramatic_change' and confidence > 0.6:
@@ -654,7 +667,14 @@ def run_manga_conversion_smart(prompt_dir, output_dir, config_type='auto'):
     runner = ColabMangaToonCrafterRunner("/content/ToonCrafter")
     
     if config_type == 'auto':
-        suggested_config, confidence = runner.analyze_manga_content(prompt_dir)
+        # Analisi intelligente automatica
+        sequence_configs = runner.analyze_manga_sequences(prompt_dir)
+        if sequence_configs:
+            # Usa la configurazione della prima sequenza come default
+            suggested_config = sequence_configs[0]['config']
+            confidence = sequence_configs[0]['confidence']
+        else:
+            suggested_config, confidence = 'manga_stable', 0.5
         print(f"\n🎯 MODALITÀ AUTO: Selezionata '{suggested_config}' (confidenza: {confidence:.1%})")
         config_type = suggested_config
     
