@@ -451,7 +451,6 @@ class ColabMangaToonCrafterRunner:
             "--interp",
             "--perframe_ae",  # Importante per memoria GPU limitata
             "--ddim_eta", "0.8",  # Ridotto per meno rumore
-            "--decode_frame_bs", "1",  # Decodifica frame singoli per stabilità
             "--timestep_spacing", "uniform",  # Distribuzione uniforme per transizioni più fluide
         ]
         
