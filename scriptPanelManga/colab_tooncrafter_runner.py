@@ -750,5 +750,67 @@ def run_manga_conversion_smart(prompt_dir, output_dir, config_type='auto'):
     print(f"\n✅ QUALITÀ RIPRISTINATA: Usando valori originali di alta qualità")
     return runner.run_inference_colab(prompt_dir, output_dir, config_type, auto_analyze=True)
 
+
+def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir):
+    """
+    🎛️ Esecuzione con parametri completamente personalizzati
+    Nessuna automazione, usa solo i parametri forniti
+    """
+    
+    # Trova frame1 e frame3
+    frame1_path = None
+    frame3_path = None
+    
+    for file in os.listdir(input_dir):
+        if file.startswith(f"{base_name}_frame1"):
+            frame1_path = os.path.join(input_dir, file)
+        elif file.startswith(f"{base_name}_frame3"):
+            frame3_path = os.path.join(input_dir, file)
+    
+    if not frame1_path or not frame3_path:
+        print(f"❌ Frame non trovati per {base_name}")
+        return False
+    
+    # Comando ToonCrafter con parametri custom
+    inference_script = self.tooncrafter_path / "scripts" / "evaluation" / "inference.py"
+    base_config = self.tooncrafter_path / "configs" / "inference_t2v_512_v1.0.yaml"
+    checkpoint = self.tooncrafter_path / "checkpoints" / "tooncrafter_512_interp_v1" / "model.ckpt"
+    
+    cmd = [
+        "python", str(inference_script),
+        "--config", str(base_config),
+        "--ckpt_path", str(checkpoint),
+        "--prompt", prompt,
+        "--image_path", frame1_path,
+        "--image_path_2", frame3_path,
+        "--n_samples", "1",
+        "--batch_size", "1",
+        "--seed", "42",
+        "--save_dir", str(output_dir),
+        # Parametri personalizzati
+        "--frame_stride", str(custom_params['frame_stride']),
+        "--ddim_steps", str(custom_params['ddim_steps']),
+        "--unconditional_guidance_scale", str(custom_params['unconditional_guidance_scale']),
+        "--guidance_rescale", str(custom_params['guidance_rescale']),
+        "--video_length", str(custom_params['video_length'])
+    ]
+    
+    print(f"🎛️ Parametri custom: {custom_params}")
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.tooncrafter_path)
+        
+        if result.returncode == 0:
+            print(f"✅ Conversione riuscita per {base_name}")
+            return True
+        else:
+            print(f"❌ Errore conversione: {result.stderr}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Errore esecuzione: {e}")
+        return False
+    
+    
 # Alias per compatibilità con il notebook
 MangaToonCrafterRunner = ColabMangaToonCrafterRunner
