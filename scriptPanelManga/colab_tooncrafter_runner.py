@@ -59,10 +59,10 @@ class ColabMangaToonCrafterRunner:
                 'description': 'Configurazione bilanciata per manga generici - VALORI ORIGINALI'
             },
             'character_focus': {
-                'frame_stride': 12,
-                'ddim_steps': 60,
-                'unconditional_guidance_scale': 8.5,
-                'guidance_rescale': 0.7,
+                'frame_stride': 5,
+                'ddim_steps': 100,
+                'unconditional_guidance_scale': 9,
+                'guidance_rescale': 0.8,
                 'video_length': 16,
                 'description': 'Per scene con focus su personaggi - RIPRISTINATO'
             },
