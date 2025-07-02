@@ -126,7 +126,19 @@ class ColabMangaToonCrafterRunner:
                 print(f"❌ Errore ridimensionamento {frame3_path}")
                 return False
             
-            print(f"\n✅ Immagini ridimensionate e copiate nella directory temporanea")
+            # ✅ CREA FILE PROMPT SPECIFICO NELLA DIRECTORY TEMPORANEA
+            prompt_file_path = os.path.join(temp_input_dir, f"{base_name}.txt")
+            with open(prompt_file_path, 'w', encoding='utf-8') as f:
+                f.write(prompt)
+            
+            print(f"📝 File prompt creato: {os.path.basename(prompt_file_path)}")
+            print(f"   Contenuto: '{prompt}'")
+            
+            # ✅ DEBUG: Mostra contenuto directory temporanea
+            temp_files = os.listdir(temp_input_dir)
+            print(f"📂 File nella directory temporanea: {temp_files}")
+            
+            print(f"\n✅ Immagini ridimensionate e file prompt creato nella directory temporanea")
             
             # ✅ COMANDO TOONCRAFTER CON DIRECTORY TEMPORANEA
             inference_script = self.tooncrafter_path / "scripts" / "evaluation" / "inference.py"
