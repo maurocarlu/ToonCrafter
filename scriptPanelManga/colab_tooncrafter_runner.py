@@ -14,6 +14,7 @@ import tempfile
 import shutil
 from PIL import Image
 import matplotlib.pyplot as plt  # ✅ AGGIUNTO PER VISUALIZZAZIONE
+from panelPreProcessing import PanelPreProcessor, create_default_preprocessing_config
 
 class ColabMangaToonCrafterRunner:
     """
@@ -22,70 +23,141 @@ class ColabMangaToonCrafterRunner:
     
     def __init__(self, tooncrafter_path: str):
         self.tooncrafter_path = Path(tooncrafter_path)
+        # ✅ AGGIUNGI PREPROCESSOR
+        self.preprocessor = PanelPreProcessor(debug_mode=True)
     
-    def resize_image_to_tooncrafter_format(self, image_path, output_path, target_width=512, target_height=320, show_images=True):
+    def resize_image_to_tooncrafter_format(self, image_path, output_path, target_width=512, target_height=320, 
+                                     show_images=True, apply_preprocessing=True, preprocessing_config=None):
         """
         📐 Ridimensiona immagine al formato richiesto da ToonCrafter (512x320)
+        🎨 Con preprocessing opzionale e visualizzazioni separate
         """
         try:
-            with Image.open(image_path) as img:
-                # ✅ DEBUG: Mostra info PRIMA del rescaling
-                original_size = img.size
-                original_mode = img.mode
-                print(f"   📸 PRIMA - File: {os.path.basename(image_path)}")
-                print(f"   📐 PRIMA - Dimensioni: {original_size[0]}x{original_size[1]} ({original_mode})")
-                
-                # Converti in RGB se necessario
-                if img.mode != 'RGB':
-                    img = img.convert('RGB')
-                    print(f"   🔄 Convertito da {original_mode} a RGB")
-                
-                # Ridimensiona 
-                img_resized = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                
-                # ✅ DEBUG: Verifica dimensioni DOPO rescaling
-                new_size = img_resized.size
-                new_mode = img_resized.mode
-                print(f"   📐 DOPO - Dimensioni: {new_size[0]}x{new_size[1]} ({new_mode})")
-                
-                # ✅ VISUALIZZA IMMAGINI PRIMA E DOPO
-                if show_images:
-                    plt.figure(figsize=(12, 6))
-                    
-                    # Immagine originale
-                    plt.subplot(1, 2, 1)
-                    plt.imshow(img)
-                    plt.title(f'PRIMA: {original_size[0]}x{original_size[1]}\n{os.path.basename(image_path)}')
-                    plt.axis('off')
-                    
-                    # Immagine ridimensionata
-                    plt.subplot(1, 2, 2)
-                    plt.imshow(img_resized)
-                    plt.title(f'DOPO: {new_size[0]}x{new_size[1]}\nRescaled per ToonCrafter')
-                    plt.axis('off')
-                    
-                    plt.tight_layout()
-                    plt.show()
-                
-                # Salva immagine ridimensionata
-                img_resized.save(output_path, 'PNG', quality=95)
-                
-                # ✅ DEBUG: Verifica file salvato
-                saved_size = os.path.getsize(output_path) / 1024  # KB
-                print(f"   💾 Salvato: {os.path.basename(output_path)} ({saved_size:.1f} KB)")
-                print(f"   ✅ Rescaling completato con successo!")
+            # ✅ STEP 1: CARICA IMMAGINE ORIGINALE E RESCALA
+            original_img = Image.open(image_path)
+            original_size = original_img.size
+            original_mode = original_img.mode
             
+            print(f"   📸 File: {os.path.basename(image_path)}")
+            print(f"   📐 ORIGINALE - Dimensioni: {original_size[0]}x{original_size[1]} ({original_mode})")
+            
+            # Converti in RGB se necessario
+            if original_img.mode != 'RGB':
+                original_img = original_img.convert('RGB')
+                print(f"   🔄 Convertito da {original_mode} a RGB")
+            
+            # Ridimensiona al formato ToonCrafter
+            img_rescaled = original_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+            rescaled_size = img_rescaled.size
+            
+            print(f"   📐 RESCALED - Dimensioni: {rescaled_size[0]}x{rescaled_size[1]} (RGB)")
+            
+            # ✅ VISUALIZZAZIONE 1: ORIGINALE vs RESCALED
+            if show_images:
+                print(f"   🖼️ VISUALIZZAZIONE 1: Pre vs Post Rescaling")
+                plt.figure(figsize=(10, 5))
+                
+                # Originale
+                plt.subplot(1, 2, 1)
+                plt.imshow(original_img)
+                plt.title(f'ORIGINALE\n{original_size[0]}x{original_size[1]}')
+                plt.axis('off')
+                
+                # Rescaled
+                plt.subplot(1, 2, 2)
+                plt.imshow(img_rescaled)
+                plt.title(f'POST-RESCALING\n{rescaled_size[0]}x{rescaled_size[1]}')
+                plt.axis('off')
+                
+                plt.tight_layout()
+                plt.show()
+            
+            # ✅ STEP 2: PREPROCESSING (se abilitato)
+            final_image = img_rescaled  # Default: usa l'immagine rescaled
+            
+            if apply_preprocessing:
+                print(f"   🎨 Applicando preprocessing su immagine rescaled...")
+                
+                # Salva temporaneamente l'immagine rescaled per il preprocessing
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+                    temp_rescaled_path = temp_file.name
+                    img_rescaled.save(temp_rescaled_path, 'PNG')
+                
+                try:
+                    config = preprocessing_config or create_default_preprocessing_config()
+                    processed_image = self.preprocessor.apply_preprocessing_pipeline(
+                        temp_rescaled_path, 
+                        pipeline_config=config
+                    )
+                    
+                    if processed_image:
+                        print(f"   ✅ Preprocessing completato")
+                        final_image = processed_image
+                        
+                        # ✅ VISUALIZZAZIONE 2: RESCALED vs PREPROCESSED
+                        if show_images:
+                            print(f"   🖼️ VISUALIZZAZIONE 2: Post-Rescaling vs Post-Preprocessing")
+                            plt.figure(figsize=(10, 5))
+                            
+                            # Post-rescaling (input del preprocessing)
+                            plt.subplot(1, 2, 1)
+                            plt.imshow(img_rescaled)
+                            plt.title(f'POST-RESCALING\n(Input Preprocessing)\n{rescaled_size[0]}x{rescaled_size[1]}')
+                            plt.axis('off')
+                            
+                            # Post-preprocessing (finale)
+                            plt.subplot(1, 2, 2)
+                            plt.imshow(processed_image)
+                            plt.title(f'POST-RESCALING-PREPROCESSING\n(Finale)\n{processed_image.size[0]}x{processed_image.size[1]}')
+                            plt.axis('off')
+                            
+                            plt.tight_layout()
+                            plt.show()
+                            
+                    else:
+                        print(f"   ⚠️ Preprocessing fallito, uso immagine rescaled")
+                        
+                finally:
+                    # Cleanup file temporaneo
+                    try:
+                        os.unlink(temp_rescaled_path)
+                    except:
+                        pass
+            else:
+                print(f"   ⚪ Preprocessing disabilitato, uso immagine rescaled")
+            
+            # ✅ SALVA IMMAGINE FINALE
+            final_image.save(output_path, 'PNG', quality=95)
+            
+            # ✅ DEBUG: Verifica file salvato
+            saved_size = os.path.getsize(output_path) / 1024  # KB
+            print(f"   💾 Salvato: {os.path.basename(output_path)} ({saved_size:.1f} KB)")
+            print(f"   ✅ Processo completato con successo!")
+        
             return True
                 
         except Exception as e:
-            print(f"   ❌ Errore ridimensionamento: {e}")
+            print(f"   ❌ Errore durante processo: {e}")
             return False
     
-    def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir, show_resize=True):
+    def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir, 
+                                       show_resize=True, enable_preprocessing=True, preprocessing_config=None):
         """
         🎛️ Esecuzione con parametri completamente personalizzati + rescaling automatico
+        🎨 NUOVO: Con preprocessing opzionale
         """
         print(f"\n🎬 === INIZIANDO CONVERSIONE: {base_name} ===")
+        
+        # Mostra configurazione preprocessing
+        if enable_preprocessing:
+            config = preprocessing_config or create_default_preprocessing_config()
+            print(f"🎨 Preprocessing abilitato:")
+            for step, step_config in config.items():
+                if step_config.get('enabled', False):
+                    print(f"   ✅ {step}: {step_config}")
+        else:
+            print(f"⚪ Preprocessing disabilitato")
         
         # Trova frame1 e frame3
         frame1_path = None
@@ -116,13 +188,13 @@ class ColabMangaToonCrafterRunner:
             
             # ✅ VISUALIZZA RESCALING FRAME1
             print(f"\n🖼️ RESCALING FRAME1:")
-            if not self.resize_image_to_tooncrafter_format(frame1_path, temp_frame1, show_images=show_resize):
+            if not self.resize_image_to_tooncrafter_format(frame1_path, temp_frame1, show_images=show_resize, apply_preprocessing=enable_preprocessing, preprocessing_config=preprocessing_config):
                 print(f"❌ Errore ridimensionamento {frame1_path}")
                 return False
             
             # ✅ VISUALIZZA RESCALING FRAME3
             print(f"\n🖼️ RESCALING FRAME3:")
-            if not self.resize_image_to_tooncrafter_format(frame3_path, temp_frame3, show_images=show_resize):
+            if not self.resize_image_to_tooncrafter_format(frame3_path, temp_frame3, show_images=show_resize, apply_preprocessing=enable_preprocessing, preprocessing_config=preprocessing_config):
                 print(f"❌ Errore ridimensionamento {frame3_path}")
                 return False
             
