@@ -2,6 +2,7 @@
 """
 Script ottimizzato per eseguire ToonCrafter su panel manga con parametri avanzati
 VERSIONE GOOGLE COLAB - ottimizzato per l'ambiente Colab
+Include modulo di preprocessing manga-specifico
 """
 
 import os
@@ -13,14 +14,180 @@ import time
 import tempfile
 import shutil
 from PIL import Image  # ✅ AGGIUNTO PER RESCALING
+from typing import Dict, Optional, Tuple
+
+# Import moduli preprocessing manga
+try:
+    from .manga_preprocessor import MangaPreprocessor
+    from .manga_quality_analyzer import MangaQualityAnalyzer
+except ImportError:
+    # Fallback per import relativi
+    try:
+        from manga_preprocessor import MangaPreprocessor
+        from manga_quality_analyzer import MangaQualityAnalyzer
+    except ImportError:
+        print("⚠️ Warning: Moduli preprocessing manga non disponibili. Usando solo rescaling base.")
+        MangaPreprocessor = None
+        MangaQualityAnalyzer = None
 
 class ColabMangaToonCrafterRunner:
     """
     Runner ottimizzato per ToonCrafter specifico per panel manga su Google Colab
+    Include funzionalità di preprocessing manga-specifico
     """
     
-    def __init__(self, tooncrafter_path: str):
+    def __init__(self, tooncrafter_path: str, enable_preprocessing: bool = True):
         self.tooncrafter_path = Path(tooncrafter_path)
+        self.enable_preprocessing = enable_preprocessing
+        
+        # Inizializza moduli preprocessing se disponibili
+        if enable_preprocessing and MangaPreprocessor is not None:
+            self.manga_preprocessor = MangaPreprocessor()
+            self.quality_analyzer = MangaQualityAnalyzer()
+            print("✅ Preprocessing manga abilitato")
+        else:
+            self.manga_preprocessor = None
+            self.quality_analyzer = None
+            if enable_preprocessing:
+                print("⚠️ Preprocessing manga non disponibile - usando solo rescaling")
+    
+    def analyze_image_quality(self, image_path: str, verbose: bool = True) -> Optional[Dict]:
+        """
+        Analizza la qualità dell'immagine e suggerisce ottimizzazioni
+        
+        Args:
+            image_path: Percorso dell'immagine da analizzare
+            verbose: Se stampare informazioni dettagliate
+            
+        Returns:
+            Dizionario con analisi qualità o None se non disponibile
+        """
+        if self.quality_analyzer is None:
+            return None
+        
+        try:
+            metrics = self.quality_analyzer.calculate_overall_quality_metrics(image_path)
+            suggestions = self.quality_analyzer.suggest_optimizations(image_path)
+            
+            if verbose:
+                print(f"📊 Analisi qualità: {os.path.basename(image_path)}")
+                print(f"   🎯 Score complessivo: {metrics.overall_score:.2f}/1.00")
+                print(f"   📈 Probabilità successo: {metrics.success_probability:.1%}")
+                print(f"   🏆 Grado: {suggestions['quality_assessment']['overall_grade']}")
+                
+                if suggestions['quality_assessment']['main_issues']:
+                    print(f"   ⚠️ Problemi: {', '.join(suggestions['quality_assessment']['main_issues'])}")
+            
+            return {
+                'metrics': metrics,
+                'suggestions': suggestions
+            }
+            
+        except Exception as e:
+            if verbose:
+                print(f"⚠️ Errore analisi qualità: {e}")
+            return None
+    
+    def preprocess_manga_image(self, 
+                              image_path: str, 
+                              output_path: str,
+                              preprocessing_options: Optional[Dict] = None,
+                              quality_analysis: Optional[Dict] = None) -> bool:
+        """
+        Applica preprocessing manga-specifico all'immagine
+        
+        Args:
+            image_path: Percorso immagine input
+            output_path: Percorso immagine output
+            preprocessing_options: Opzioni di preprocessing personalizzate
+            quality_analysis: Analisi qualità pre-calcolata
+            
+        Returns:
+            True se successo, False altrimenti
+        """
+        if self.manga_preprocessor is None:
+            # Fallback al resize normale
+            return self.resize_image_to_tooncrafter_format(image_path, output_path)
+        
+        try:
+            # Usa opzioni di default intelligenti basate su analisi qualità
+            if preprocessing_options is None:
+                preprocessing_options = self._get_intelligent_preprocessing_options(quality_analysis)
+            
+            print(f"🎨 Preprocessing manga: {os.path.basename(image_path)}")
+            
+            # Applica preprocessing completo
+            results = self.manga_preprocessor.preprocess_manga_panel(
+                image_path, 
+                output_path, 
+                preprocessing_options
+            )
+            
+            if results['success']:
+                print(f"   ✅ Preprocessing completato: {', '.join(results['processing_steps'])}")
+                
+                # Mostra info analisi se disponibile
+                analysis = results.get('analysis', {})
+                if 'line_art_complexity' in analysis:
+                    print(f"   📏 Complessità line art: {analysis['line_art_complexity']:.2f}")
+                if 'content_classification' in analysis:
+                    content = analysis['content_classification']
+                    main_content = max(content, key=content.get)
+                    print(f"   🎭 Contenuto principale: {main_content} ({content[main_content]:.2f})")
+                
+                return True
+            else:
+                print(f"   ❌ Preprocessing fallito")
+                return False
+                
+        except Exception as e:
+            print(f"   ❌ Errore preprocessing: {e}")
+            # Fallback al resize normale
+            return self.resize_image_to_tooncrafter_format(image_path, output_path)
+    
+    def _get_intelligent_preprocessing_options(self, quality_analysis: Optional[Dict] = None) -> Dict:
+        """
+        Genera opzioni di preprocessing intelligenti basate sull'analisi qualità
+        
+        Args:
+            quality_analysis: Risultati analisi qualità
+            
+        Returns:
+            Dizionario con opzioni di preprocessing ottimizzate
+        """
+        # Opzioni di default
+        options = {
+            'contrast_enhancement': True,
+            'line_art_sharpening': True,
+            'noise_reduction': True,
+            'tone_normalization': True,
+            'edge_reinforcement': True,
+            'preserve_screentones': True
+        }
+        
+        # Ottimizza basato su analisi qualità
+        if quality_analysis and 'suggestions' in quality_analysis:
+            suggestions = quality_analysis['suggestions']
+            
+            # Disabilita sharpening se già abbastanza nitido
+            if quality_analysis['metrics'].sharpness_score > 0.8:
+                options['line_art_sharpening'] = False
+            
+            # Aumenta noise reduction se necessario
+            if quality_analysis['metrics'].noise_level > 0.4:
+                options['noise_reduction'] = True
+            
+            # Applica suggerimenti specifici
+            if 'preprocessing_recommendations' in suggestions:
+                recs = suggestions['preprocessing_recommendations']
+                
+                if 'noise_reduction' in recs and recs['noise_reduction']['recommended']:
+                    options['noise_reduction'] = True
+                
+                if 'contrast_enhancement' in recs and recs['contrast_enhancement']['recommended']:
+                    options['contrast_enhancement'] = True
+        
+        return options
     
     def resize_image_to_tooncrafter_format(self, image_path, output_path, target_width=512, target_height=320):
         """
@@ -71,9 +238,25 @@ class ColabMangaToonCrafterRunner:
             print(f"   ❌ Errore ridimensionamento: {e}")
             return False
     
-    def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir):
+    def run_custom_parameters_conversion(self, 
+                                        base_name, 
+                                        prompt, 
+                                        custom_params, 
+                                        output_dir, 
+                                        input_dir,
+                                        enable_manga_preprocessing: bool = True,
+                                        preprocessing_options: Optional[Dict] = None):
         """
-        🎛️ Esecuzione con parametri completamente personalizzati + rescaling automatico
+        🎛️ Esecuzione con parametri completamente personalizzati + preprocessing manga + rescaling automatico
+        
+        Args:
+            base_name: Nome base per i file
+            prompt: Prompt di testo per ToonCrafter
+            custom_params: Parametri personalizzati ToonCrafter
+            output_dir: Directory di output
+            input_dir: Directory di input
+            enable_manga_preprocessing: Se abilitare preprocessing manga-specifico
+            preprocessing_options: Opzioni personalizzate per preprocessing
         """
         print(f"\n🎬 === INIZIANDO CONVERSIONE: {base_name} ===")
         
@@ -93,28 +276,59 @@ class ColabMangaToonCrafterRunner:
         
         print(f"📸 Input: {os.path.basename(frame1_path)} → {os.path.basename(frame3_path)}")
         
-        # ✅ CREA DIRECTORY TEMPORANEA CON RESCALING
+        # ✅ ANALISI QUALITÀ (se preprocessing abilitato)
+        quality_analysis_frame1 = None
+        quality_analysis_frame3 = None
+        
+        if enable_manga_preprocessing and self.quality_analyzer is not None:
+            print(f"🔍 Analizzando qualità immagini...")
+            quality_analysis_frame1 = self.analyze_image_quality(frame1_path, verbose=True)
+            quality_analysis_frame3 = self.analyze_image_quality(frame3_path, verbose=True)
+            
+            # Suggerisci parametri ToonCrafter ottimizzati se la qualità è bassa
+            if quality_analysis_frame1 and quality_analysis_frame1['metrics'].success_probability < 0.6:
+                self._suggest_tooncrafter_parameters(quality_analysis_frame1, custom_params)
+        
+        # ✅ CREA DIRECTORY TEMPORANEA CON PROCESSING AVANZATO
         temp_input_dir = tempfile.mkdtemp(prefix=f"tooncrafter_{base_name}_")
         
         try:
-            # ✅ RESCALING + COPIA FILE SPECIFICI
+            # ✅ PREPROCESSING + RESCALING
             temp_frame1 = os.path.join(temp_input_dir, os.path.basename(frame1_path))
             temp_frame3 = os.path.join(temp_input_dir, os.path.basename(frame3_path))
             
             print(f"📁 Directory temporanea: {temp_input_dir}")
-            print(f"📐 Ridimensionando immagini a 512x320...")
             
-            # Ridimensiona frame1
-            if not self.resize_image_to_tooncrafter_format(frame1_path, temp_frame1):
-                print(f"❌ Errore ridimensionamento {frame1_path}")
-                return False
+            if enable_manga_preprocessing and self.manga_preprocessor is not None:
+                print(f"🎨 Applicando preprocessing manga + ridimensionamento a 512x320...")
+                
+                # Preprocessing + resize per frame1
+                success1 = self._preprocess_and_resize(
+                    frame1_path, temp_frame1, preprocessing_options, quality_analysis_frame1
+                )
+                
+                # Preprocessing + resize per frame3  
+                success3 = self._preprocess_and_resize(
+                    frame3_path, temp_frame3, preprocessing_options, quality_analysis_frame3
+                )
+                
+                if not success1 or not success3:
+                    print(f"❌ Errore durante preprocessing")
+                    return False
+                    
+            else:
+                print(f"📐 Ridimensionando immagini a 512x320...")
+                
+                # Solo ridimensionamento standard
+                if not self.resize_image_to_tooncrafter_format(frame1_path, temp_frame1):
+                    print(f"❌ Errore ridimensionamento {frame1_path}")
+                    return False
+                
+                if not self.resize_image_to_tooncrafter_format(frame3_path, temp_frame3):
+                    print(f"❌ Errore ridimensionamento {frame3_path}")
+                    return False
             
-            # Ridimensiona frame3
-            if not self.resize_image_to_tooncrafter_format(frame3_path, temp_frame3):
-                print(f"❌ Errore ridimensionamento {frame3_path}")
-                return False
-            
-            print(f"✅ Immagini ridimensionate e copiate nella directory temporanea")
+            print(f"✅ Immagini processate e pronte per ToonCrafter")
             
             # ✅ COMANDO TOONCRAFTER CON DIRECTORY TEMPORANEA
             inference_script = self.tooncrafter_path / "scripts" / "evaluation" / "inference.py"
@@ -157,6 +371,8 @@ class ColabMangaToonCrafterRunner:
             print(f"   • guidance_scale: {custom_params['unconditional_guidance_scale']}")
             print(f"   • guidance_rescale: {custom_params['guidance_rescale']}")
             print(f"   • video_length: {custom_params['video_length']}")
+            preprocessing_status = "Abilitato" if enable_manga_preprocessing and self.manga_preprocessor else "Disabilitato"
+            print(f"   • preprocessing_manga: {preprocessing_status}")
             print(f"📁 Input: {temp_input_dir} (512x320)")
             print(f"📁 Output: {final_output_dir}")
             print(f"🚀 Avviando ToonCrafter...")
@@ -204,6 +420,267 @@ class ColabMangaToonCrafterRunner:
                 print(f"🗑️ Directory temporanea pulita")
             except:
                 pass
+    
+    def _preprocess_and_resize(self, 
+                              input_path: str, 
+                              output_path: str, 
+                              preprocessing_options: Optional[Dict] = None,
+                              quality_analysis: Optional[Dict] = None) -> bool:
+        """
+        Applica preprocessing manga e ridimensiona a formato ToonCrafter
+        
+        Args:
+            input_path: Percorso immagine input
+            output_path: Percorso immagine output
+            preprocessing_options: Opzioni preprocessing
+            quality_analysis: Analisi qualità
+            
+        Returns:
+            True se successo, False altrimenti
+        """
+        try:
+            # Step 1: Preprocessing manga
+            temp_preprocessed = tempfile.mktemp(suffix='.png')
+            
+            success = self.preprocess_manga_image(
+                input_path, 
+                temp_preprocessed, 
+                preprocessing_options, 
+                quality_analysis
+            )
+            
+            if not success:
+                return False
+            
+            # Step 2: Ridimensiona a formato ToonCrafter
+            success = self.resize_image_to_tooncrafter_format(temp_preprocessed, output_path)
+            
+            # Pulisci file temporaneo
+            if os.path.exists(temp_preprocessed):
+                os.remove(temp_preprocessed)
+            
+            return success
+            
+        except Exception as e:
+            print(f"   ❌ Errore _preprocess_and_resize: {e}")
+            return False
+    
+    def _suggest_tooncrafter_parameters(self, quality_analysis: Dict, custom_params: Dict):
+        """
+        Suggerisci modifiche ai parametri ToonCrafter basate sull'analisi qualità
+        
+        Args:
+            quality_analysis: Risultati analisi qualità
+            custom_params: Parametri attuali (modificati in-place)
+        """
+        if 'suggestions' not in quality_analysis:
+            return
+        
+        suggestions = quality_analysis['suggestions']
+        
+        if 'parameter_adjustments' in suggestions:
+            adjustments = suggestions['parameter_adjustments']
+            
+            modified = []
+            
+            if 'guidance_scale' in adjustments:
+                old_value = custom_params['unconditional_guidance_scale']
+                custom_params['unconditional_guidance_scale'] = adjustments['guidance_scale']['recommended_value']
+                modified.append(f"guidance_scale: {old_value} → {adjustments['guidance_scale']['recommended_value']}")
+            
+            if 'ddim_steps' in adjustments:
+                old_value = custom_params['ddim_steps']
+                custom_params['ddim_steps'] = adjustments['ddim_steps']['recommended_value']
+                modified.append(f"ddim_steps: {old_value} → {adjustments['ddim_steps']['recommended_value']}")
+            
+            if 'frame_stride' in adjustments:
+                old_value = custom_params['frame_stride']
+                custom_params['frame_stride'] = adjustments['frame_stride']['recommended_value']
+                modified.append(f"frame_stride: {old_value} → {adjustments['frame_stride']['recommended_value']}")
+            
+            if modified:
+                print(f"🎛️ Parametri ottimizzati automaticamente:")
+                for mod in modified:
+                    print(f"   • {mod}")
+                print(f"   Motivo: Qualità input bassa - ottimizzazione automatica")
 
 # Alias per compatibilità con il notebook
 MangaToonCrafterRunner = ColabMangaToonCrafterRunner
+
+
+# ✅ FUNZIONI DI UTILITÀ PER PREPROCESSING MANGA
+
+def create_preprocessing_presets() -> Dict[str, Dict]:
+    """
+    Crea preset di preprocessing ottimizzati per diversi tipi di manga
+    
+    Returns:
+        Dizionario con preset predefiniti
+    """
+    return {
+        'default': {
+            'contrast_enhancement': True,
+            'line_art_sharpening': True,
+            'noise_reduction': True,
+            'tone_normalization': True,
+            'edge_reinforcement': True,
+            'preserve_screentones': True
+        },
+        'high_quality': {
+            'contrast_enhancement': True,
+            'line_art_sharpening': False,  # Già di alta qualità
+            'noise_reduction': False,      # Non necessario
+            'tone_normalization': True,
+            'edge_reinforcement': True,
+            'preserve_screentones': True
+        },
+        'low_quality_scan': {
+            'contrast_enhancement': True,
+            'line_art_sharpening': True,
+            'noise_reduction': True,       # Importante per scan di bassa qualità
+            'tone_normalization': True,
+            'edge_reinforcement': True,
+            'preserve_screentones': True
+        },
+        'digital_manga': {
+            'contrast_enhancement': False, # Già ottimizzato
+            'line_art_sharpening': False,  # Già nitido
+            'noise_reduction': False,      # Nessun rumore di scansione
+            'tone_normalization': True,
+            'edge_reinforcement': True,
+            'preserve_screentones': True
+        },
+        'action_sequence': {
+            'contrast_enhancement': True,
+            'line_art_sharpening': True,   # Importante per linee dinamiche
+            'noise_reduction': True,
+            'tone_normalization': True,
+            'edge_reinforcement': True,    # Cruciale per scene d'azione
+            'preserve_screentones': True
+        }
+    }
+
+
+def run_with_manga_preprocessing(tooncrafter_path: str,
+                                prompt_dir: str,
+                                output_dir: str,
+                                config_type: str = "dramatic_change",
+                                preprocessing_preset: str = "default",
+                                custom_preprocessing: Optional[Dict] = None,
+                                enable_quality_analysis: bool = True) -> bool:
+    """
+    Funzione di convenienza per eseguire ToonCrafter con preprocessing manga
+    
+    Args:
+        tooncrafter_path: Percorso installazione ToonCrafter
+        prompt_dir: Directory con immagini e prompt
+        output_dir: Directory output
+        config_type: Tipo configurazione ToonCrafter
+        preprocessing_preset: Preset preprocessing ('default', 'high_quality', etc.)
+        custom_preprocessing: Opzioni preprocessing personalizzate
+        enable_quality_analysis: Se abilitare analisi qualità
+        
+    Returns:
+        True se successo, False altrimenti
+    """
+    # Configurazioni ToonCrafter predefinite
+    configs = {
+        "colab_fast": {
+            'unconditional_guidance_scale': 7.5,
+            'ddim_steps': 25,
+            'video_length': 16,
+            'frame_stride': 10,
+            'guidance_rescale': 0.7
+        },
+        "smooth_transition": {
+            'unconditional_guidance_scale': 7.5,
+            'ddim_steps': 50,
+            'video_length': 16,
+            'frame_stride': 8,
+            'guidance_rescale': 0.7
+        },
+        "dramatic_change": {
+            'unconditional_guidance_scale': 10.0,
+            'ddim_steps': 50,
+            'video_length': 16,
+            'frame_stride': 6,
+            'guidance_rescale': 0.7
+        },
+        "action_sequence": {
+            'unconditional_guidance_scale': 12.0,
+            'ddim_steps': 75,
+            'video_length': 16,
+            'frame_stride': 5,
+            'guidance_rescale': 0.8
+        }
+    }
+    
+    if config_type not in configs:
+        print(f"❌ Configurazione '{config_type}' non riconosciuta")
+        return False
+    
+    # Ottieni preset preprocessing
+    presets = create_preprocessing_presets()
+    if preprocessing_preset not in presets:
+        print(f"❌ Preset preprocessing '{preprocessing_preset}' non riconosciuto")
+        return False
+    
+    preprocessing_options = presets[preprocessing_preset]
+    if custom_preprocessing:
+        preprocessing_options.update(custom_preprocessing)
+    
+    print(f"🎌 Avviando ToonCrafter con preprocessing manga")
+    print(f"   📁 Input: {prompt_dir}")
+    print(f"   📁 Output: {output_dir}")
+    print(f"   ⚙️ Config: {config_type}")
+    print(f"   🎨 Preprocessing: {preprocessing_preset}")
+    
+    # Inizializza runner
+    runner = ColabMangaToonCrafterRunner(tooncrafter_path, enable_preprocessing=True)
+    
+    # Cerca file di input
+    success_count = 0
+    total_count = 0
+    
+    try:
+        for file in os.listdir(prompt_dir):
+            if file.endswith("_frame1.png") or file.endswith("_frame1.jpg"):
+                base_name = file.replace("_frame1.png", "").replace("_frame1.jpg", "")
+                
+                # Cerca file prompt corrispondente
+                prompt_file = os.path.join(prompt_dir, f"{base_name}.txt")
+                prompt = "manga to anime style transformation"
+                
+                if os.path.exists(prompt_file):
+                    with open(prompt_file, 'r', encoding='utf-8') as f:
+                        prompt = f.read().strip()
+                
+                print(f"\n🎬 Processando: {base_name}")
+                total_count += 1
+                
+                # Esegui conversione con preprocessing
+                success = runner.run_custom_parameters_conversion(
+                    base_name=base_name,
+                    prompt=prompt,
+                    custom_params=configs[config_type],
+                    output_dir=output_dir,
+                    input_dir=prompt_dir,
+                    enable_manga_preprocessing=True,
+                    preprocessing_options=preprocessing_options
+                )
+                
+                if success:
+                    success_count += 1
+                    print(f"✅ {base_name} completato con successo")
+                else:
+                    print(f"❌ {base_name} fallito")
+    
+    except Exception as e:
+        print(f"❌ Errore durante elaborazione: {e}")
+        return False
+    
+    print(f"\n🎉 RIEPILOGO:")
+    print(f"   ✅ Successi: {success_count}/{total_count}")
+    print(f"   📁 Output salvato in: {output_dir}")
+    
+    return success_count > 0
