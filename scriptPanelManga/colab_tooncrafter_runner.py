@@ -10,6 +10,9 @@ import subprocess
 import yaml
 from pathlib import Path
 import time
+import tempfile
+import shutil
+from PIL import Image  # ✅ AGGIUNTO PER RESCALING
 
 class ColabMangaToonCrafterRunner:
     """
@@ -19,9 +22,58 @@ class ColabMangaToonCrafterRunner:
     def __init__(self, tooncrafter_path: str):
         self.tooncrafter_path = Path(tooncrafter_path)
     
+    def resize_image_to_tooncrafter_format(self, image_path, output_path, target_width=512, target_height=320):
+        """
+        📐 Ridimensiona immagine al formato richiesto da ToonCrafter (512x320)
+        """
+        try:
+            with Image.open(image_path) as img:
+                # ✅ DEBUG: Mostra info PRIMA del rescaling
+                original_size = img.size
+                original_mode = img.mode
+                print(f"   📸 PRIMA - File: {os.path.basename(image_path)}")
+                print(f"   📐 PRIMA - Dimensioni: {original_size[0]}x{original_size[1]} ({original_mode})")
+                
+                # Converti in RGB se necessario
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                    print(f"   🔄 Convertito da {original_mode} a RGB")
+                
+                # Ridimensiona 
+                img_resized = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                
+                # ✅ DEBUG: Verifica dimensioni DOPO rescaling
+                new_size = img_resized.size
+                new_mode = img_resized.mode
+                print(f"   📐 DOPO - Dimensioni: {new_size[0]}x{new_size[1]} ({new_mode})")
+                
+                # Salva immagine ridimensionata
+                img_resized.save(output_path, 'PNG', quality=95)
+                
+                # ✅ DEBUG: Verifica file salvato
+                saved_size = os.path.getsize(output_path) / 1024  # KB
+                print(f"   💾 Salvato: {os.path.basename(output_path)} ({saved_size:.1f} KB)")
+                
+                # ✅ VERIFICA FINALE: Rileggi il file salvato per conferma
+                with Image.open(output_path) as saved_img:
+                    final_size = saved_img.size
+                    final_mode = saved_img.mode
+                    print(f"   ✅ VERIFICATO - Dimensioni finali: {final_size[0]}x{final_size[1]} ({final_mode})")
+                    
+                    if final_size == (target_width, target_height):
+                        print(f"   ✅ Rescaling completato con successo!")
+                    else:
+                        print(f"   ⚠️ Warning: Dimensioni non corrispondono al target!")
+            
+            return True
+                
+        except Exception as e:
+            print(f"   ❌ Errore ridimensionamento: {e}")
+            return False
+    
     def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir):
         """
-        🎛️ Esecuzione con parametri completamente personalizzati
+        🎛️ Esecuzione con parametri completamente personalizzati + rescaling automatico
         """
         print(f"\n🎬 === INIZIANDO CONVERSIONE: {base_name} ===")
         
@@ -41,30 +93,35 @@ class ColabMangaToonCrafterRunner:
         
         print(f"📸 Input: {os.path.basename(frame1_path)} → {os.path.basename(frame3_path)}")
         
-        # ✅ CREA DIRECTORY TEMPORANEA SOLO PER QUESTA SEQUENZA
-        import tempfile
-        import shutil
-        
+        # ✅ CREA DIRECTORY TEMPORANEA CON RESCALING
         temp_input_dir = tempfile.mkdtemp(prefix=f"tooncrafter_{base_name}_")
         
         try:
-            # Copia SOLO i due file specifici nella directory temporanea
+            # ✅ RESCALING + COPIA FILE SPECIFICI
             temp_frame1 = os.path.join(temp_input_dir, os.path.basename(frame1_path))
             temp_frame3 = os.path.join(temp_input_dir, os.path.basename(frame3_path))
             
-            shutil.copy2(frame1_path, temp_frame1)
-            shutil.copy2(frame3_path, temp_frame3)
-            
             print(f"📁 Directory temporanea: {temp_input_dir}")
-            print(f"   ✅ Copiato: {os.path.basename(temp_frame1)}")
-            print(f"   ✅ Copiato: {os.path.basename(temp_frame3)}")
+            print(f"📐 Ridimensionando immagini a 512x320...")
             
-            # ✅ COMANDO CORRETTO CON DIRECTORY TEMPORANEA
+            # Ridimensiona frame1
+            if not self.resize_image_to_tooncrafter_format(frame1_path, temp_frame1):
+                print(f"❌ Errore ridimensionamento {frame1_path}")
+                return False
+            
+            # Ridimensiona frame3
+            if not self.resize_image_to_tooncrafter_format(frame3_path, temp_frame3):
+                print(f"❌ Errore ridimensionamento {frame3_path}")
+                return False
+            
+            print(f"✅ Immagini ridimensionate e copiate nella directory temporanea")
+            
+            # ✅ COMANDO TOONCRAFTER CON DIRECTORY TEMPORANEA
             inference_script = self.tooncrafter_path / "scripts" / "evaluation" / "inference.py"
             base_config = self.tooncrafter_path / "configs" / "inference_512_v1.0.yaml"
             checkpoint = self.tooncrafter_path / "checkpoints" / "tooncrafter_512_interp_v1" / "model.ckpt"
             
-            # ✅ Crea nome output con seed
+            # Crea nome output con seed
             seed = 123
             name = f"tooncrafter_{base_name}_seed{seed}"
             final_output_dir = os.path.join(output_dir, name)
@@ -92,7 +149,7 @@ class ColabMangaToonCrafterRunner:
                 "--interp"
             ]
             
-            # 🆕 OUTPUT DETTAGLIATO
+            # OUTPUT DETTAGLIATO
             print(f"📝 PROMPT: '{prompt}'")
             print(f"🎛️ PARAMETRI:")
             print(f"   • frame_stride: {custom_params['frame_stride']}")
@@ -100,11 +157,11 @@ class ColabMangaToonCrafterRunner:
             print(f"   • guidance_scale: {custom_params['unconditional_guidance_scale']}")
             print(f"   • guidance_rescale: {custom_params['guidance_rescale']}")
             print(f"   • video_length: {custom_params['video_length']}")
-            print(f"📁 Input: {temp_input_dir}")
+            print(f"📁 Input: {temp_input_dir} (512x320)")
             print(f"📁 Output: {final_output_dir}")
             print(f"🚀 Avviando ToonCrafter...")
             
-            # 🆕 DEBUG: Mostra comando completo
+            # DEBUG: Mostra comando completo
             print(f"🔧 Comando: {' '.join(cmd)}")
             
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.tooncrafter_path)
