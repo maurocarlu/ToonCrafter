@@ -18,54 +18,6 @@ class ColabMangaToonCrafterRunner:
     
     def __init__(self, tooncrafter_path: str):
         self.tooncrafter_path = Path(tooncrafter_path)
-        self.configs = self._load_optimized_configs()
-        
-        # Configurazioni specifiche per Colab
-        self.colab_optimizations = {
-            'use_mixed_precision': True,
-            'enable_xformers': True,
-            'cpu_offload': False,  # Colab ha buone GPU, mantieni tutto su GPU
-            'max_memory_usage': 0.9  # Usa 90% della VRAM disponibile
-        }
-    
-    def check_colab_environment(self):
-        """
-        Verifica l'ambiente Google Colab e ottimizza di conseguenza
-        """
-        import torch
-        
-        print("🔍 Verifica ambiente Google Colab:")
-        
-        # Verifica GPU
-        if torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
-            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-            print(f"✅ GPU: {gpu_name}")
-            print(f"✅ VRAM: {gpu_memory:.1f} GB")
-            
-            # Ottimizzazioni specifiche per tipo di GPU
-            if 'T4' in gpu_name:
-                print("🎯 Ottimizzazioni per Tesla T4")
-                self.colab_optimizations['max_memory_usage'] = 0.85
-            elif 'V100' in gpu_name:
-                print("🎯 Ottimizzazioni per Tesla V100")
-                self.colab_optimizations['max_memory_usage'] = 0.9
-            
-        else:
-            print("❌ GPU non disponibile!")
-            print("Vai su Runtime > Change runtime type > Hardware accelerator > GPU")
-            return False
-        
-        # Verifica spazio disco
-        import shutil
-        disk_usage = shutil.disk_usage("/content")
-        free_gb = disk_usage.free / 1024**3
-        print(f"💾 Spazio libero: {free_gb:.1f} GB")
-        
-        if free_gb < 2:
-            print("⚠️ Spazio disco limitato. Considera di pulire file temporanei.")
-        
-        return True
     
     def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir):
         """
@@ -156,6 +108,5 @@ class ColabMangaToonCrafterRunner:
             print(f"❌ Errore durante esecuzione: {e}")
             return False
 
-    
 # Alias per compatibilità con il notebook
 MangaToonCrafterRunner = ColabMangaToonCrafterRunner
