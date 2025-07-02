@@ -1,5 +1,37 @@
 # 🎌 Manga to Anime Pipeline per Google Colab
 
+**Sistema completo per convertire panel manga in scene anime utilizzando ToonCrafter + Preprocessing Manga-Specifico**
+
+## 🆕 NUOVO: Preprocessing Manga Intelligente
+
+Il sistema ora include un **modulo di preprocessing manga-specifico** che migliora significativamente la qualità dell'output:
+
+### ✨ Funzionalità Avanzate:
+- **🔍 Analisi Qualità Automatica**: Valuta nitidezza, contrasto, rumore e line art quality
+- **🎨 Preprocessing Adattivo**: Miglioramenti personalizzati basati sull'analisi dell'input  
+- **🎛️ Ottimizzazione Parametri**: Auto-ottimizzazione parametri ToonCrafter per input problematici
+- **🖼️ Preservazione Stile**: Mantiene caratteristiche manga originali (line art, retini, balloon)
+- **📊 Metriche Dettagliate**: Report completo con suggerimenti di miglioramento
+
+### 🚀 Utilizzo con Preprocessing:
+
+```python
+from scriptPanelManga.colab_tooncrafter_runner import run_with_manga_preprocessing
+
+# Esecuzione con preprocessing automatico (CONSIGLIATO)
+success = run_with_manga_preprocessing(
+    tooncrafter_path="ToonCrafter",
+    prompt_dir="test_prompts/manga_test", 
+    output_dir="output_videos/result",
+    config_type="dramatic_change",
+    preprocessing_preset="default"  # o "high_quality", "low_quality_scan", etc.
+)
+```
+
+**[📖 Documentazione Completa Preprocessing →](README_MANGA_PREPROCESSING.md)**
+
+---
+
 Questa è la versione ottimizzata per **Google Colab** della pipeline per convertire panel manga in scene anime utilizzando ToonCrafter.
 
 ## 🚀 Come Usare (Guida Rapida)
@@ -31,10 +63,21 @@ Hai 2 opzioni:
 - `manga_to_anime.py`
 - `Manga109Dataset.py`
 
+### ✨ NUOVI Moduli Preprocessing:
+- `manga_preprocessor.py` - Preprocessing manga-specifico avanzato
+- `manga_quality_analyzer.py` - Analisi qualità e ottimizzazione automatica
+- `test_manga_preprocessing.py` - Test suite per validazione funzionalità
+
 ### Immagini manga:
 - Almeno 2 immagini PNG/JPG
 - Risoluzione minima: 512x320 pixel
 - Panel che mostrano una progressione logica
+
+### 🎨 Preprocessing Automatico:
+Il sistema ora analizza automaticamente la qualità delle immagini input e applica ottimizzazioni appropriate:
+- **Analisi qualità real-time** con metriche dettagliate
+- **Preprocessing adattivo** basato sul tipo di manga
+- **Ottimizzazione automatica** parametri ToonCrafter
 
 ## 🎛️ Configurazioni Ottimizzate per Colab
 
@@ -86,20 +129,29 @@ Il sistema include configurazioni specificamente ottimizzate per Google Colab:
 
 ## 📊 Tempi di Esecuzione Stimati
 
-| Configurazione | T4 (Gratuito) | V100 (Pro) | Qualità Output |
-|---------------|---------------|-------------|----------------|
-| `colab_fast` | 3-5 min | 2-3 min | Buona |
-| `smooth_transition` | 5-8 min | 3-5 min | Molto buona |
-| `dramatic_change` | 8-12 min | 5-8 min | Eccellente |
-| `action_sequence` | 10-15 min | 6-10 min | Eccellente |
+| Configurazione | T4 (Gratuito) | V100 (Pro) | Qualità Output | Con Preprocessing |
+|---------------|---------------|-------------|----------------|-------------------|
+| `colab_fast` | 3-5 min | 2-3 min | Buona | +1-2 min |
+| `smooth_transition` | 5-8 min | 3-5 min | Molto buona | +1-2 min |
+| `dramatic_change` | 8-12 min | 5-8 min | Eccellente | +2-3 min |
+| `action_sequence` | 10-15 min | 6-10 min | Eccellente | +2-3 min |
+
+*Il preprocessing aggiunge 1-3 minuti ma migliora significativamente la qualità output*
 
 ## 🎯 Suggerimenti per Migliori Risultati
+
+### 🆕 Preprocessing Automatico (RACCOMANDATO)
+1. **Abilita preprocessing manga**: Usa `run_with_manga_preprocessing()` per risultati ottimali
+2. **Preset intelligenti**: Scegli tra `default`, `high_quality`, `low_quality_scan`, `action_sequence`
+3. **Analisi qualità automatica**: Il sistema analizza e ottimizza automaticamente l'input
+4. **Ottimizzazione parametri**: I parametri ToonCrafter vengono auto-regolati per input problematici
 
 ### Preparazione Immagini
 1. **Risoluzione**: Ridimensiona a 512x320 o multipli
 2. **Formato**: Preferisci PNG per la qualità
 3. **Contenuto**: Evita panel troppo dettagliati o confusi
 4. **Sequenza**: Scegli panel che mostrano una progressione logica
+5. **✨ Qualità**: Il preprocessing gestisce automaticamente scan di bassa qualità e artefatti
 
 ### Prompt Efficaci
 ```
