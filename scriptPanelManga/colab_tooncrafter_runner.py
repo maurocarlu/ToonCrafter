@@ -41,28 +41,37 @@ class ColabMangaToonCrafterRunner:
         
         print(f"📸 Input: {os.path.basename(frame1_path)} → {os.path.basename(frame3_path)}")
         
-        # Comando ToonCrafter con parametri custom
+        # ✅ COMANDO CORRETTO BASATO SU run.sh
         inference_script = self.tooncrafter_path / "scripts" / "evaluation" / "inference.py"
-        base_config = self.tooncrafter_path / "configs" / "inference_t2v_512_v1.0.yaml"
+        base_config = self.tooncrafter_path / "configs" / "inference_512_v1.0.yaml"  # ✅ Nome corretto
         checkpoint = self.tooncrafter_path / "checkpoints" / "tooncrafter_512_interp_v1" / "model.ckpt"
         
+        # ✅ Crea nome output con seed
+        seed = 123
+        name = f"tooncrafter_{base_name}_seed{seed}"
+        final_output_dir = os.path.join(output_dir, name)
+        
         cmd = [
-            "python", str(inference_script),
-            "--config", str(base_config),
+            "python3", str(inference_script),
+            "--seed", str(seed),
             "--ckpt_path", str(checkpoint),
-            "--prompt", prompt,
-            "--image_path", frame1_path,
-            "--image_path_2", frame3_path,
+            "--config", str(base_config),
+            "--savedir", str(final_output_dir),
             "--n_samples", "1",
-            "--batch_size", "1",
-            "--seed", "42",
-            "--save_dir", str(output_dir),
-            # Parametri personalizzati
-            "--frame_stride", str(custom_params['frame_stride']),
-            "--ddim_steps", str(custom_params['ddim_steps']),
+            "--bs", "1", 
+            "--height", "320", 
+            "--width", "512",
             "--unconditional_guidance_scale", str(custom_params['unconditional_guidance_scale']),
+            "--ddim_steps", str(custom_params['ddim_steps']),
+            "--ddim_eta", "1.0",
+            "--prompt_dir", input_dir,
+            "--text_input",
+            "--video_length", str(custom_params['video_length']),
+            "--frame_stride", str(custom_params['frame_stride']),
+            "--timestep_spacing", "uniform_trailing",
             "--guidance_rescale", str(custom_params['guidance_rescale']),
-            "--video_length", str(custom_params['video_length'])
+            "--perframe_ae",
+            "--interp"
         ]
         
         # 🆕 OUTPUT DETTAGLIATO
@@ -73,8 +82,12 @@ class ColabMangaToonCrafterRunner:
         print(f"   • guidance_scale: {custom_params['unconditional_guidance_scale']}")
         print(f"   • guidance_rescale: {custom_params['guidance_rescale']}")
         print(f"   • video_length: {custom_params['video_length']}")
-        print(f"📁 Output: {output_dir}")
+        print(f"📁 Input: {input_dir}")
+        print(f"📁 Output: {final_output_dir}")
         print(f"🚀 Avviando ToonCrafter...")
+        
+        # 🆕 DEBUG: Mostra comando completo
+        print(f"🔧 Comando: {' '.join(cmd)}")
         
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.tooncrafter_path)
@@ -82,10 +95,10 @@ class ColabMangaToonCrafterRunner:
             if result.returncode == 0:
                 print(f"✅ Conversione completata per '{base_name}'!")
                 
-                # 🆕 VERIFICA FILE GENERATI
+                # Verifica file generati
                 generated_files = []
-                if os.path.exists(output_dir):
-                    for root, dirs, files in os.walk(output_dir):
+                if os.path.exists(final_output_dir):
+                    for root, dirs, files in os.walk(final_output_dir):
                         for file in files:
                             if file.endswith(('.mp4', '.avi', '.mov')):
                                 video_path = os.path.join(root, file)
@@ -101,7 +114,9 @@ class ColabMangaToonCrafterRunner:
                 print(f"❌ ToonCrafter fallito!")
                 print(f"   Return code: {result.returncode}")
                 if result.stderr:
-                    print(f"   Error: {result.stderr[:200]}...")
+                    print(f"   Error: {result.stderr}")
+                if result.stdout:
+                    print(f"   Output: {result.stdout}")
                 return False
                 
         except Exception as e:
