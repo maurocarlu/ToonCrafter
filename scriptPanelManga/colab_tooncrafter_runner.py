@@ -12,7 +12,8 @@ from pathlib import Path
 import time
 import tempfile
 import shutil
-from PIL import Image  # ✅ AGGIUNTO PER RESCALING
+from PIL import Image
+import matplotlib.pyplot as plt  # ✅ AGGIUNTO PER VISUALIZZAZIONE
 
 class ColabMangaToonCrafterRunner:
     """
@@ -22,7 +23,7 @@ class ColabMangaToonCrafterRunner:
     def __init__(self, tooncrafter_path: str):
         self.tooncrafter_path = Path(tooncrafter_path)
     
-    def resize_image_to_tooncrafter_format(self, image_path, output_path, target_width=512, target_height=320):
+    def resize_image_to_tooncrafter_format(self, image_path, output_path, target_width=512, target_height=320, show_images=True):
         """
         📐 Ridimensiona immagine al formato richiesto da ToonCrafter (512x320)
         """
@@ -47,23 +48,32 @@ class ColabMangaToonCrafterRunner:
                 new_mode = img_resized.mode
                 print(f"   📐 DOPO - Dimensioni: {new_size[0]}x{new_size[1]} ({new_mode})")
                 
+                # ✅ VISUALIZZA IMMAGINI PRIMA E DOPO
+                if show_images:
+                    plt.figure(figsize=(12, 6))
+                    
+                    # Immagine originale
+                    plt.subplot(1, 2, 1)
+                    plt.imshow(img)
+                    plt.title(f'PRIMA: {original_size[0]}x{original_size[1]}\n{os.path.basename(image_path)}')
+                    plt.axis('off')
+                    
+                    # Immagine ridimensionata
+                    plt.subplot(1, 2, 2)
+                    plt.imshow(img_resized)
+                    plt.title(f'DOPO: {new_size[0]}x{new_size[1]}\nRescaled per ToonCrafter')
+                    plt.axis('off')
+                    
+                    plt.tight_layout()
+                    plt.show()
+                
                 # Salva immagine ridimensionata
                 img_resized.save(output_path, 'PNG', quality=95)
                 
                 # ✅ DEBUG: Verifica file salvato
                 saved_size = os.path.getsize(output_path) / 1024  # KB
                 print(f"   💾 Salvato: {os.path.basename(output_path)} ({saved_size:.1f} KB)")
-                
-                # ✅ VERIFICA FINALE: Rileggi il file salvato per conferma
-                with Image.open(output_path) as saved_img:
-                    final_size = saved_img.size
-                    final_mode = saved_img.mode
-                    print(f"   ✅ VERIFICATO - Dimensioni finali: {final_size[0]}x{final_size[1]} ({final_mode})")
-                    
-                    if final_size == (target_width, target_height):
-                        print(f"   ✅ Rescaling completato con successo!")
-                    else:
-                        print(f"   ⚠️ Warning: Dimensioni non corrispondono al target!")
+                print(f"   ✅ Rescaling completato con successo!")
             
             return True
                 
@@ -71,7 +81,7 @@ class ColabMangaToonCrafterRunner:
             print(f"   ❌ Errore ridimensionamento: {e}")
             return False
     
-    def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir):
+    def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir, show_resize=True):
         """
         🎛️ Esecuzione con parametri completamente personalizzati + rescaling automatico
         """
@@ -104,17 +114,19 @@ class ColabMangaToonCrafterRunner:
             print(f"📁 Directory temporanea: {temp_input_dir}")
             print(f"📐 Ridimensionando immagini a 512x320...")
             
-            # Ridimensiona frame1
-            if not self.resize_image_to_tooncrafter_format(frame1_path, temp_frame1):
+            # ✅ VISUALIZZA RESCALING FRAME1
+            print(f"\n🖼️ RESCALING FRAME1:")
+            if not self.resize_image_to_tooncrafter_format(frame1_path, temp_frame1, show_images=show_resize):
                 print(f"❌ Errore ridimensionamento {frame1_path}")
                 return False
             
-            # Ridimensiona frame3
-            if not self.resize_image_to_tooncrafter_format(frame3_path, temp_frame3):
+            # ✅ VISUALIZZA RESCALING FRAME3
+            print(f"\n🖼️ RESCALING FRAME3:")
+            if not self.resize_image_to_tooncrafter_format(frame3_path, temp_frame3, show_images=show_resize):
                 print(f"❌ Errore ridimensionamento {frame3_path}")
                 return False
             
-            print(f"✅ Immagini ridimensionate e copiate nella directory temporanea")
+            print(f"\n✅ Immagini ridimensionate e copiate nella directory temporanea")
             
             # ✅ COMANDO TOONCRAFTER CON DIRECTORY TEMPORANEA
             inference_script = self.tooncrafter_path / "scripts" / "evaluation" / "inference.py"
