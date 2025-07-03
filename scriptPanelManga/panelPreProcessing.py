@@ -24,17 +24,14 @@ class PanelPreProcessor:
         """
         self.debug_mode = debug_mode
     
-    def contrast_adaptive_enhancement(self, image_path, output_path=None, 
-                                    clahe_clip_limit=3.0, clahe_tile_grid=(8,8),
-                                    preserve_lines=True, line_threshold=0.1):
+    def contrast_adaptive_enhancement(self, image_input, output_path=None, 
+                                clahe_clip_limit=3.0, clahe_tile_grid=(8,8),
+                                preserve_lines=True, line_threshold=0.1):
         """
         🎯 Contrast Adaptive Enhancement per preservare line art sottili
         
-        Utilizza CLAHE (Contrast Limited Adaptive Histogram Equalization) 
-        per migliorare il contrasto mantenendo i dettagli delle linee
-        
         Args:
-            image_path (str): Path dell'immagine input
+            image_input: Path dell'immagine (str) o oggetto PIL.Image  # ✅ CAMBIATO
             output_path (str): Path output (opzionale)
             clahe_clip_limit (float): Limite di clipping per CLAHE (2.0-4.0)
             clahe_tile_grid (tuple): Griglia per l'adattamento locale
@@ -46,84 +43,93 @@ class PanelPreProcessor:
         """
         
         print(f"🎨 === CONTRAST ADAPTIVE ENHANCEMENT ===")
-        print(f"📸 Input: {image_path}")
         print(f"🎛️ CLAHE clip_limit: {clahe_clip_limit}")
         print(f"🎛️ Tile grid: {clahe_tile_grid}")
         print(f"🎛️ Preserve lines: {preserve_lines}")
         
         try:
-            # ✅ CARICA IMMAGINE
-            with Image.open(image_path) as img:
-                img_rgb = img.convert('RGB')
-                img_array = np.array(img_rgb)
+            # ✅ GESTISCI SIA PATH CHE PIL.IMAGE (AGGIUNTO)
+            if isinstance(image_input, str):
+                # È un path di file
+                print(f"📸 Input: {image_input}")
+                with Image.open(image_input) as img:
+                    img_rgb = img.convert('RGB')
+            elif hasattr(image_input, 'convert'):
+                # È un oggetto PIL.Image
+                print(f"📸 Input: PIL.Image {image_input.size}")
+                img_rgb = image_input.convert('RGB')
+            else:
+                raise ValueError("Input deve essere un path (str) o PIL.Image")
+            
+            img_array = np.array(img_rgb)
+            
+            if self.debug_mode:
+                original_stats = self._get_image_stats(img_array)
+                print(f"📊 Stats originali: {original_stats}")
+            
+            # ✅ CONVERSIONE IN LAB COLOR SPACE
+            # LAB è ideale per miglioramenti di luminosità/contrasto
+            img_lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+            l_channel, a_channel, b_channel = cv2.split(img_lab)
+            
+            # ✅ DETECTION LINEE (se richiesta)
+            line_mask = None
+            if preserve_lines:
+                line_mask = self._detect_line_art(l_channel, line_threshold)
+                print(f"🖋️ Linee detectate: {np.sum(line_mask > 0)} pixels")
+            
+            # ✅ APPLICAZIONE CLAHE SUL CANALE L (LUMINOSITÀ)
+            clahe = cv2.createCLAHE(
+                clipLimit=clahe_clip_limit, 
+                tileGridSize=clahe_tile_grid
+            )
+            
+            l_enhanced = clahe.apply(l_channel)
+            
+            # ✅ PROTEZIONE LINEE (se richiesta)
+            if preserve_lines and line_mask is not None:
+                # Blend conservativo sulle aree di linee
+                blend_factor = 0.7  # Mantieni 70% originale sulle linee
+                line_areas = line_mask > 0
+                l_enhanced[line_areas] = (
+                    blend_factor * l_channel[line_areas] + 
+                    (1 - blend_factor) * l_enhanced[line_areas]
+                ).astype(np.uint8)
+                print(f"🛡️ Protezione linee applicata con blend factor: {blend_factor}")
+            
+            # ✅ RICOSTRUZIONE IMMAGINE LAB
+            img_lab_enhanced = cv2.merge([l_enhanced, a_channel, b_channel])
+            
+            # ✅ CONVERSIONE BACK TO RGB
+            img_enhanced = cv2.cvtColor(img_lab_enhanced, cv2.COLOR_LAB2RGB)
+            
+            # ✅ CONVERSIONE IN PIL IMAGE
+            img_pil_enhanced = Image.fromarray(img_enhanced)
+            
+            # ✅ STATISTICHE FINALI
+            if self.debug_mode:
+                enhanced_stats = self._get_image_stats(img_enhanced)
+                print(f"📊 Stats enhanced: {enhanced_stats}")
                 
-                if self.debug_mode:
-                    original_stats = self._get_image_stats(img_array)
-                    print(f"📊 Stats originali: {original_stats}")
-                
-                # ✅ CONVERSIONE IN LAB COLOR SPACE
-                # LAB è ideale per miglioramenti di luminosità/contrasto
-                img_lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
-                l_channel, a_channel, b_channel = cv2.split(img_lab)
-                
-                # ✅ DETECTION LINEE (se richiesta)
-                line_mask = None
-                if preserve_lines:
-                    line_mask = self._detect_line_art(l_channel, line_threshold)
-                    print(f"🖋️ Linee detectate: {np.sum(line_mask > 0)} pixels")
-                
-                # ✅ APPLICAZIONE CLAHE SUL CANALE L (LUMINOSITÀ)
-                clahe = cv2.createCLAHE(
-                    clipLimit=clahe_clip_limit, 
-                    tileGridSize=clahe_tile_grid
+                # Calcola miglioramento contrasto
+                contrast_improvement = enhanced_stats['std'] / original_stats['std']
+                print(f"📈 Miglioramento contrasto: {contrast_improvement:.2f}x")
+            
+            # ✅ VISUALIZZAZIONE COMPARATIVA
+            if self.debug_mode:
+                self._show_enhancement_comparison(
+                    img_rgb, img_enhanced, line_mask,
+                    f"CLAHE Enhancement (clip={clahe_clip_limit})"
                 )
-                
-                l_enhanced = clahe.apply(l_channel)
-                
-                # ✅ PROTEZIONE LINEE (se richiesta)
-                if preserve_lines and line_mask is not None:
-                    # Blend conservativo sulle aree di linee
-                    blend_factor = 0.7  # Mantieni 70% originale sulle linee
-                    line_areas = line_mask > 0
-                    l_enhanced[line_areas] = (
-                        blend_factor * l_channel[line_areas] + 
-                        (1 - blend_factor) * l_enhanced[line_areas]
-                    ).astype(np.uint8)
-                    print(f"🛡️ Protezione linee applicata con blend factor: {blend_factor}")
-                
-                # ✅ RICOSTRUZIONE IMMAGINE LAB
-                img_lab_enhanced = cv2.merge([l_enhanced, a_channel, b_channel])
-                
-                # ✅ CONVERSIONE BACK TO RGB
-                img_enhanced = cv2.cvtColor(img_lab_enhanced, cv2.COLOR_LAB2RGB)
-                
-                # ✅ CONVERSIONE IN PIL IMAGE
-                img_pil_enhanced = Image.fromarray(img_enhanced)
-                
-                # ✅ STATISTICHE FINALI
-                if self.debug_mode:
-                    enhanced_stats = self._get_image_stats(img_enhanced)
-                    print(f"📊 Stats enhanced: {enhanced_stats}")
-                    
-                    # Calcola miglioramento contrasto
-                    contrast_improvement = enhanced_stats['std'] / original_stats['std']
-                    print(f"📈 Miglioramento contrasto: {contrast_improvement:.2f}x")
-                
-                # ✅ VISUALIZZAZIONE COMPARATIVA
-                if self.debug_mode:
-                    self._show_enhancement_comparison(
-                        img_rgb, img_enhanced, line_mask,
-                        f"CLAHE Enhancement (clip={clahe_clip_limit})"
-                    )
-                
-                # ✅ SALVATAGGIO (se richiesto)
-                if output_path:
-                    img_pil_enhanced.save(output_path, 'PNG', quality=95)
-                    print(f"💾 Salvato: {output_path}")
-                
-                print(f"✅ Contrast Adaptive Enhancement completato!")
-                return img_pil_enhanced
-                
+            
+            # ✅ SALVATAGGIO (se richiesto)
+            if output_path:
+                img_pil_enhanced.save(output_path, 'PNG', quality=95)
+                print(f"💾 Salvato: {output_path}")
+            
+            print(f"✅ Contrast Adaptive Enhancement completato!")
+            return img_pil_enhanced
+            
         except Exception as e:
             print(f"❌ Errore durante enhancement: {e}")
             return None
