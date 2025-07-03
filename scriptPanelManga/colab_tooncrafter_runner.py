@@ -14,7 +14,7 @@ import tempfile
 import shutil
 from PIL import Image
 import matplotlib.pyplot as plt  # ✅ AGGIUNTO PER VISUALIZZAZIONE
-from panelPreProcessing import PanelPreProcessor, create_default_preprocessing_config
+from panelPreProcessing import PanelPreProcessor, create_manga_preprocessing_config
 
 class ColabMangaToonCrafterRunner:
     """
@@ -75,8 +75,9 @@ class ColabMangaToonCrafterRunner:
             # ✅ STEP 2: PREPROCESSING (se abilitato)
             final_image = img_rescaled  # Default: usa l'immagine rescaled
             
+            # ✅ PREPROCESSING CON CONFIGURAZIONE UNICA
             if apply_preprocessing:
-                print(f"   🎨 Applicando preprocessing su immagine rescaled...")
+                print(f"   🎨 Applicando preprocessing...")
                 
                 # Salva temporaneamente l'immagine rescaled per il preprocessing
                 import tempfile
@@ -85,7 +86,8 @@ class ColabMangaToonCrafterRunner:
                     img_rescaled.save(temp_rescaled_path, 'PNG')
                 
                 try:
-                    config = preprocessing_config or create_default_preprocessing_config()
+                    # USA SEMPRE LA STESSA CONFIGURAZIONE
+                    config = preprocessing_config or create_manga_preprocessing_config()
                     processed_image = self.preprocessor.apply_preprocessing_pipeline(
                         temp_rescaled_path, 
                         pipeline_config=config
@@ -151,7 +153,7 @@ class ColabMangaToonCrafterRunner:
         
         # Mostra configurazione preprocessing
         if enable_preprocessing:
-            config = preprocessing_config or create_default_preprocessing_config()
+            config = preprocessing_config or create_manga_preprocessing_config()
             print(f"🎨 Preprocessing abilitato:")
             for step, step_config in config.items():
                 if step_config.get('enabled', False):
