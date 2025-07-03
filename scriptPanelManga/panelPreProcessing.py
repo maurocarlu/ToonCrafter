@@ -269,15 +269,15 @@ class PanelPreProcessor:
         print(f"🏁 Pipeline preprocessing completata!")
         return current_image if isinstance(current_image, Image.Image) else Image.open(current_image)
 
-    def edge_detection_reinforcement(self, image_path, output_path=None,
-                               edge_detection_method='canny', 
-                               canny_low=50, canny_high=150,
-                               sobel_threshold=100,
-                               reinforcement_strength=0.3,
-                               blur_before_detection=True,
-                               blur_kernel_size=3,
-                               dilate_edges=True,
-                               dilate_iterations=1):
+    def edge_detection_reinforcement(self, image_input, output_path=None,
+                           edge_detection_method='canny', 
+                           canny_low=50, canny_high=150,
+                           sobel_threshold=100,
+                           reinforcement_strength=0.3,
+                           blur_before_detection=True,
+                           blur_kernel_size=3,
+                           dilate_edges=True,
+                           dilate_iterations=1):
         """
         🖋️ Edge Detection e Reinforcement per preservare struttura manga
         
@@ -302,140 +302,149 @@ class PanelPreProcessor:
         """
         
         print(f"🖋️ === EDGE DETECTION E REINFORCEMENT ===")
-        print(f"📸 Input: {image_path}")
         print(f"🎛️ Metodo: {edge_detection_method}")
         print(f"🎛️ Reinforcement strength: {reinforcement_strength}")
         print(f"🎛️ Canny thresholds: {canny_low}-{canny_high}")
         
         try:
-            # ✅ CARICA IMMAGINE
-            with Image.open(image_path) as img:
-                img_rgb = img.convert('RGB')
-                img_array = np.array(img_rgb)
+            # ✅ GESTISCI SIA PATH CHE PIL.IMAGE
+            if isinstance(image_input, str):
+                # È un path di file
+                print(f"📸 Input: {image_input}")
+                with Image.open(image_input) as img:
+                    img_rgb = img.convert('RGB')
+            elif hasattr(image_input, 'convert'):
+                # È un oggetto PIL.Image
+                print(f"📸 Input: PIL.Image {image_input.size}")
+                img_rgb = image_input.convert('RGB')
+            else:
+                raise ValueError("Input deve essere un path (str) o PIL.Image")
+            
+            img_array = np.array(img_rgb)
+            
+            if self.debug_mode:
+                original_stats = self._get_image_stats(img_array)
+                print(f"📊 Stats originali: {original_stats}")
+            
+            # ✅ CONVERSIONE IN GRAYSCALE PER EDGE DETECTION
+            img_gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            
+            # ✅ BLUR PRELIMINARE (se richiesto)
+            if blur_before_detection:
+                img_gray_processed = cv2.GaussianBlur(img_gray, 
+                                                    (blur_kernel_size, blur_kernel_size), 
+                                                    1.0)
+                print(f"🌀 Blur applicato: kernel {blur_kernel_size}x{blur_kernel_size}")
+            else:
+                img_gray_processed = img_gray.copy()
+            
+            # ✅ EDGE DETECTION (MULTIPLI METODI)
+            edges_combined = None
+            
+            if edge_detection_method == 'canny':
+                edges = cv2.Canny(img_gray_processed, canny_low, canny_high)
+                edges_combined = edges
+                print(f"🎯 Canny edges: {np.sum(edges > 0)} pixels")
                 
-                if self.debug_mode:
-                    original_stats = self._get_image_stats(img_array)
-                    print(f"📊 Stats originali: {original_stats}")
+            elif edge_detection_method == 'sobel':
+                # Sobel X e Y
+                sobel_x = cv2.Sobel(img_gray_processed, cv2.CV_64F, 1, 0, ksize=3)
+                sobel_y = cv2.Sobel(img_gray_processed, cv2.CV_64F, 0, 1, ksize=3)
+                sobel_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+                edges = (sobel_magnitude > sobel_threshold).astype(np.uint8) * 255
+                edges_combined = edges
+                print(f"📐 Sobel edges: {np.sum(edges > 0)} pixels")
                 
-                # ✅ CONVERSIONE IN GRAYSCALE PER EDGE DETECTION
-                img_gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            elif edge_detection_method == 'laplacian':
+                laplacian = cv2.Laplacian(img_gray_processed, cv2.CV_64F)
+                edges = (np.abs(laplacian) > sobel_threshold).astype(np.uint8) * 255
+                edges_combined = edges
+                print(f"🌊 Laplacian edges: {np.sum(edges > 0)} pixels")
                 
-                # ✅ BLUR PRELIMINARE (se richiesto)
-                if blur_before_detection:
-                    img_gray_processed = cv2.GaussianBlur(img_gray, 
-                                                        (blur_kernel_size, blur_kernel_size), 
-                                                        1.0)
-                    print(f"🌀 Blur applicato: kernel {blur_kernel_size}x{blur_kernel_size}")
-                else:
-                    img_gray_processed = img_gray.copy()
+            elif edge_detection_method == 'combined':
+                # COMBINAZIONE MULTI-METODO per massima copertura
                 
-                # ✅ EDGE DETECTION (MULTIPLI METODI)
-                edges_combined = None
+                # Canny per edges principali
+                edges_canny = cv2.Canny(img_gray_processed, canny_low, canny_high)
                 
-                if edge_detection_method == 'canny':
-                    edges = cv2.Canny(img_gray_processed, canny_low, canny_high)
-                    edges_combined = edges
-                    print(f"🎯 Canny edges: {np.sum(edges > 0)} pixels")
-                    
-                elif edge_detection_method == 'sobel':
-                    # Sobel X e Y
-                    sobel_x = cv2.Sobel(img_gray_processed, cv2.CV_64F, 1, 0, ksize=3)
-                    sobel_y = cv2.Sobel(img_gray_processed, cv2.CV_64F, 0, 1, ksize=3)
-                    sobel_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
-                    edges = (sobel_magnitude > sobel_threshold).astype(np.uint8) * 255
-                    edges_combined = edges
-                    print(f"📐 Sobel edges: {np.sum(edges > 0)} pixels")
-                    
-                elif edge_detection_method == 'laplacian':
-                    laplacian = cv2.Laplacian(img_gray_processed, cv2.CV_64F)
-                    edges = (np.abs(laplacian) > sobel_threshold).astype(np.uint8) * 255
-                    edges_combined = edges
-                    print(f"🌊 Laplacian edges: {np.sum(edges > 0)} pixels")
-                    
-                elif edge_detection_method == 'combined':
-                    # COMBINAZIONE MULTI-METODO per massima copertura
-                    
-                    # Canny per edges principali
-                    edges_canny = cv2.Canny(img_gray_processed, canny_low, canny_high)
-                    
-                    # Sobel per dettagli
-                    sobel_x = cv2.Sobel(img_gray_processed, cv2.CV_64F, 1, 0, ksize=3)
-                    sobel_y = cv2.Sobel(img_gray_processed, cv2.CV_64F, 0, 1, ksize=3)
-                    sobel_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
-                    edges_sobel = (sobel_magnitude > sobel_threshold * 0.7).astype(np.uint8) * 255
-                    
-                    # Laplacian per texture fine
-                    laplacian = cv2.Laplacian(img_gray_processed, cv2.CV_64F)
-                    edges_laplacian = (np.abs(laplacian) > sobel_threshold * 0.5).astype(np.uint8) * 255
-                    
-                    # Combina tutti gli edges
-                    edges_combined = cv2.bitwise_or(edges_canny, 
-                                                  cv2.bitwise_or(edges_sobel, edges_laplacian))
-                    
-                    print(f"🔥 Combined edges:")
-                    print(f"   - Canny: {np.sum(edges_canny > 0)} pixels")
-                    print(f"   - Sobel: {np.sum(edges_sobel > 0)} pixels") 
-                    print(f"   - Laplacian: {np.sum(edges_laplacian > 0)} pixels")
-                    print(f"   - Combined: {np.sum(edges_combined > 0)} pixels")
+                # Sobel per dettagli
+                sobel_x = cv2.Sobel(img_gray_processed, cv2.CV_64F, 1, 0, ksize=3)
+                sobel_y = cv2.Sobel(img_gray_processed, cv2.CV_64F, 0, 1, ksize=3)
+                sobel_magnitude = np.sqrt(sobel_x**2 + sobel_y**2)
+                edges_sobel = (sobel_magnitude > sobel_threshold * 0.7).astype(np.uint8) * 255
                 
-                # ✅ POST-PROCESSING EDGES
-                if dilate_edges:
-                    kernel = np.ones((3, 3), np.uint8)
-                    edges_combined = cv2.dilate(edges_combined, kernel, iterations=dilate_iterations)
-                    print(f"🔧 Edges dilatati: {dilate_iterations} iterazioni")
+                # Laplacian per texture fine
+                laplacian = cv2.Laplacian(img_gray_processed, cv2.CV_64F)
+                edges_laplacian = (np.abs(laplacian) > sobel_threshold * 0.5).astype(np.uint8) * 255
                 
-                # ✅ REINFORCEMENT: BLEND CON IMMAGINE ORIGINALE
-                # Converti edges in RGB per il blend
-                edges_rgb = cv2.cvtColor(edges_combined, cv2.COLOR_GRAY2RGB)
+                # Combina tutti gli edges
+                edges_combined = cv2.bitwise_or(edges_canny, 
+                                            cv2.bitwise_or(edges_sobel, edges_laplacian))
                 
-                # Normalizza edges (0-1)
-                edges_normalized = edges_rgb.astype(np.float32) / 255.0
-                img_normalized = img_array.astype(np.float32) / 255.0
+                print(f"🔥 Combined edges:")
+                print(f"   - Canny: {np.sum(edges_canny > 0)} pixels")
+                print(f"   - Sobel: {np.sum(edges_sobel > 0)} pixels") 
+                print(f"   - Laplacian: {np.sum(edges_laplacian > 0)} pixels")
+                print(f"   - Combined: {np.sum(edges_combined > 0)} pixels")
+            
+            # ✅ POST-PROCESSING EDGES
+            if dilate_edges:
+                kernel = np.ones((3, 3), np.uint8)
+                edges_combined = cv2.dilate(edges_combined, kernel, iterations=dilate_iterations)
+                print(f"🔧 Edges dilatati: {dilate_iterations} iterazioni")
+            
+            # ✅ REINFORCEMENT: BLEND CON IMMAGINE ORIGINALE
+            # Converti edges in RGB per il blend
+            edges_rgb = cv2.cvtColor(edges_combined, cv2.COLOR_GRAY2RGB)
+            
+            # Normalizza edges (0-1)
+            edges_normalized = edges_rgb.astype(np.float32) / 255.0
+            img_normalized = img_array.astype(np.float32) / 255.0
+            
+            # REINFORCEMENT: Scurisci le aree di edge
+            # Formula: img_reinforced = img_original - (edges * reinforcement_strength)
+            img_reinforced = img_normalized - (edges_normalized * reinforcement_strength)
+            
+            # Clamp values 0-1 e converti back a uint8
+            img_reinforced = np.clip(img_reinforced, 0, 1)
+            img_reinforced = (img_reinforced * 255).astype(np.uint8)
+            
+            # ✅ CONVERSIONE IN PIL IMAGE
+            img_pil_reinforced = Image.fromarray(img_reinforced)
+            
+            # ✅ STATISTICHE FINALI
+            if self.debug_mode:
+                reinforced_stats = self._get_image_stats(img_reinforced)
+                print(f"📊 Stats reinforced: {reinforced_stats}")
                 
-                # REINFORCEMENT: Scurisci le aree di edge
-                # Formula: img_reinforced = img_original - (edges * reinforcement_strength)
-                img_reinforced = img_normalized - (edges_normalized * reinforcement_strength)
-                
-                # Clamp values 0-1 e converti back a uint8
-                img_reinforced = np.clip(img_reinforced, 0, 1)
-                img_reinforced = (img_reinforced * 255).astype(np.uint8)
-                
-                # ✅ CONVERSIONE IN PIL IMAGE
-                img_pil_reinforced = Image.fromarray(img_reinforced)
-                
-                # ✅ STATISTICHE FINALI
-                if self.debug_mode:
-                    reinforced_stats = self._get_image_stats(img_reinforced)
-                    print(f"📊 Stats reinforced: {reinforced_stats}")
-                    
-                    # Calcola numero di edges
-                    edge_density = np.sum(edges_combined > 0) / (edges_combined.shape[0] * edges_combined.shape[1])
-                    print(f"📏 Edge density: {edge_density:.3f} ({edge_density*100:.1f}%)")
-                
-                # ✅ VISUALIZZAZIONE COMPARATIVA
-                if self.debug_mode:
-                    self._show_edge_reinforcement_comparison(
-                        img_rgb, img_reinforced, edges_combined,
-                        f"Edge Reinforcement ({edge_detection_method})"
-                    )
-                
-                # ✅ SALVATAGGIO (se richiesto)
-                if output_path:
-                    img_pil_reinforced.save(output_path, 'PNG', quality=95)
-                    print(f"💾 Salvato: {output_path}")
-                
-                print(f"✅ Edge Detection e Reinforcement completato!")
-                return img_pil_reinforced
-                
+                # Calcola numero di edges
+                edge_density = np.sum(edges_combined > 0) / (edges_combined.shape[0] * edges_combined.shape[1])
+                print(f"📏 Edge density: {edge_density:.3f} ({edge_density*100:.1f}%)")
+            
+            # ✅ VISUALIZZAZIONE COMPARATIVA
+            if self.debug_mode:
+                self._show_edge_reinforcement_comparison(
+                    img_rgb, img_reinforced, edges_combined,
+                    f"Edge Reinforcement ({edge_detection_method})"
+                )
+            
+            # ✅ SALVATAGGIO (se richiesto)
+            if output_path:
+                img_pil_reinforced.save(output_path, 'PNG', quality=95)
+                print(f"💾 Salvato: {output_path}")
+            
+            print(f"✅ Edge Detection e Reinforcement completato!")
+            return img_pil_reinforced
+            
         except Exception as e:
             print(f"❌ Errore durante edge reinforcement: {e}")
             return None
 
-    def noise_reduction_manga(self, image_path, output_path=None,
-                         method='bilateral', 
-                         bilateral_d=9, bilateral_sigma_color=75, bilateral_sigma_space=75,
-                         median_kernel=5,
-                         preserve_edges=True):
+    def noise_reduction_manga(self, image_input, output_path=None,
+                     method='bilateral', 
+                     bilateral_d=9, bilateral_sigma_color=75, bilateral_sigma_space=75,
+                     median_kernel=5,
+                     preserve_edges=True):
         """
         🧹 Noise Reduction ottimizzato per manga
         
@@ -456,67 +465,75 @@ class PanelPreProcessor:
         """
         
         print(f"🧹 === NOISE REDUCTION MANGA ===")
-        print(f"📸 Input: {image_path}")
         print(f"🎛️ Metodo: {method}")
         
         try:
-            with Image.open(image_path) as img:
-                img_rgb = img.convert('RGB')
-                img_array = np.array(img_rgb)
+            # ✅ GESTISCI SIA PATH CHE PIL.IMAGE
+            if isinstance(image_input, str):
+                print(f"📸 Input: {image_input}")
+                with Image.open(image_input) as img:
+                    img_rgb = img.convert('RGB')
+            elif hasattr(image_input, 'convert'):
+                print(f"📸 Input: PIL.Image {image_input.size}")
+                img_rgb = image_input.convert('RGB')
+            else:
+                raise ValueError("Input deve essere un path (str) o PIL.Image")
+            
+            img_array = np.array(img_rgb)
+            
+            if method == 'bilateral':
+                # Bilateral filter: ottimo per preservare edges
+                img_denoised = cv2.bilateralFilter(img_array, bilateral_d, 
+                                                bilateral_sigma_color, bilateral_sigma_space)
+                print(f"🎯 Bilateral filter: d={bilateral_d}, σcolor={bilateral_sigma_color}, σspace={bilateral_sigma_space}")
                 
-                if method == 'bilateral':
-                    # Bilateral filter: ottimo per preservare edges
-                    img_denoised = cv2.bilateralFilter(img_array, bilateral_d, 
-                                                     bilateral_sigma_color, bilateral_sigma_space)
-                    print(f"🎯 Bilateral filter: d={bilateral_d}, σcolor={bilateral_sigma_color}, σspace={bilateral_sigma_space}")
-                    
-                elif method == 'median':
-                    # Median filter: rimuove noise impulsivo
-                    img_denoised = cv2.medianBlur(img_array, median_kernel)
-                    print(f"📐 Median filter: kernel={median_kernel}")
-                    
-                elif method == 'gaussian':
-                    # Gaussian filter: smoothing generale
-                    img_denoised = cv2.GaussianBlur(img_array, (5, 5), 1.0)
-                    print(f"🌀 Gaussian filter applicato")
-                    
-                elif method == 'combined':
-                    # Combinazione per denoising ottimale
-                    # 1. Bilateral per preservare edges
-                    img_temp = cv2.bilateralFilter(img_array, bilateral_d//2, 
-                                                 bilateral_sigma_color//2, bilateral_sigma_space//2)
-                    # 2. Median leggero per noise impulsivo
-                    img_denoised = cv2.medianBlur(img_temp, 3)
-                    print(f"🔥 Combined denoising applicato")
+            elif method == 'median':
+                # Median filter: rimuove noise impulsivo
+                img_denoised = cv2.medianBlur(img_array, median_kernel)
+                print(f"📐 Median filter: kernel={median_kernel}")
                 
-                # Edge preservation enhancement
-                if preserve_edges:
-                    # Detecta edges per preservarli
-                    gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-                    edges = cv2.Canny(gray, 50, 150)
-                    
-                    # Blend conservativo sulle edges
-                    edge_mask = (edges > 0)
-                    for channel in range(3):
-                        img_denoised[edge_mask, channel] = (
-                            0.7 * img_array[edge_mask, channel] + 
-                            0.3 * img_denoised[edge_mask, channel]
-                        )
-                    print(f"🛡️ Edge preservation applicato")
+            elif method == 'gaussian':
+                # Gaussian filter: smoothing generale
+                img_denoised = cv2.GaussianBlur(img_array, (5, 5), 1.0)
+                print(f"🌀 Gaussian filter applicato")
                 
-                img_pil_denoised = Image.fromarray(img_denoised)
+            elif method == 'combined':
+                # Combinazione per denoising ottimale
+                # 1. Bilateral per preservare edges
+                img_temp = cv2.bilateralFilter(img_array, bilateral_d//2, 
+                                            bilateral_sigma_color//2, bilateral_sigma_space//2)
+                # 2. Median leggero per noise impulsivo
+                img_denoised = cv2.medianBlur(img_temp, 3)
+                print(f"🔥 Combined denoising applicato")
+            
+            # Edge preservation enhancement
+            if preserve_edges:
+                # Detecta edges per preservarli
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+                edges = cv2.Canny(gray, 50, 150)
                 
-                # Visualizzazione
-                if self.debug_mode:
-                    self._show_denoising_comparison(img_rgb, img_denoised, method)
-                
-                if output_path:
-                    img_pil_denoised.save(output_path, 'PNG', quality=95)
-                    print(f"💾 Salvato: {output_path}")
-                
-                print(f"✅ Noise reduction completato!")
-                return img_pil_denoised
-                
+                # Blend conservativo sulle edges
+                edge_mask = (edges > 0)
+                for channel in range(3):
+                    img_denoised[edge_mask, channel] = (
+                        0.7 * img_array[edge_mask, channel] + 
+                        0.3 * img_denoised[edge_mask, channel]
+                    )
+                print(f"🛡️ Edge preservation applicato")
+            
+            img_pil_denoised = Image.fromarray(img_denoised)
+            
+            # Visualizzazione
+            if self.debug_mode:
+                self._show_denoising_comparison(img_rgb, img_denoised, method)
+            
+            if output_path:
+                img_pil_denoised.save(output_path, 'PNG', quality=95)
+                print(f"💾 Salvato: {output_path}")
+            
+            print(f"✅ Noise reduction completato!")
+            return img_pil_denoised
+            
         except Exception as e:
             print(f"❌ Errore durante noise reduction: {e}")
             return None
