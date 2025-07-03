@@ -217,9 +217,9 @@ class PanelPreProcessor:
             denoised_img = self.noise_reduction_manga(
                 current_image,
                 method=nr_config.get('method', 'bilateral'),
-                bilateral_d=nr_config.get('bilateral_d', 7),
-                bilateral_sigma_color=nr_config.get('bilateral_sigma_color', 75),
-                bilateral_sigma_space=nr_config.get('bilateral_sigma_space', 75),
+                bilateral_d=nr_config.get('bilateral_d', 5),
+                bilateral_sigma_color=nr_config.get('bilateral_sigma_color', 50),
+                bilateral_sigma_space=nr_config.get('bilateral_sigma_space', 50),
                 preserve_edges=nr_config.get('preserve_edges', True)
             )
             
@@ -238,10 +238,10 @@ class PanelPreProcessor:
                 canny_low=er_config.get('canny_low', 50),
                 canny_high=er_config.get('canny_high', 150),
                 sobel_threshold=er_config.get('sobel_threshold', 100),
-                reinforcement_strength=er_config.get('reinforcement_strength', 0.3),
+                reinforcement_strength=er_config.get('reinforcement_strength', 0.15),
                 blur_before_detection=er_config.get('blur_before_detection', True),
                 dilate_edges=er_config.get('dilate_edges', True),
-                dilate_iterations=er_config.get('dilate_iterations', 1)
+                dilate_iterations=er_config.get('dilate_iterations', 0)
             )
             
             if reinforced_img:
@@ -255,7 +255,7 @@ class PanelPreProcessor:
             
             enhanced_img = self.contrast_adaptive_enhancement(  # ✅ QUESTO METODO ESISTE
                 current_image,
-                clahe_clip_limit=ce_config.get('clahe_clip_limit', 3.0),
+                clahe_clip_limit=ce_config.get('clahe_clip_limit', 2.0),
                 clahe_tile_grid=tuple(ce_config.get('clahe_tile_grid', [8, 8])),
                 preserve_lines=ce_config.get('preserve_lines', True),
                 line_threshold=ce_config.get('line_threshold', 0.1)
