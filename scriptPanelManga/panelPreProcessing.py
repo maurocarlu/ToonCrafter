@@ -227,7 +227,23 @@ class PanelPreProcessor:
                 current_image = denoised_img
                 print(f"✅ Noise reduction applicato")
         
-        # ✅ STEP 2: Edge Reinforcement
+        # ✅ STEP 2: Screentone Normalization
+        if config.get('screentone_normalization', {}).get('enabled', False):
+            print(f"\n✨ STEP 2: Screentone Normalization")
+            st_config = config['screentone_normalization']
+            
+            normalized_img = self.screentone_normalization(
+                current_image,
+                fft_threshold=st_config.get('fft_threshold', 1.5),
+                median_kernel_size=st_config.get('median_kernel_size', 11),
+                preserve_rgb=st_config.get('preserve_rgb', True)
+            )
+            
+            if normalized_img:
+                current_image = normalized_img
+                print(f"✅ Screentone normalization applicata")
+        
+        # ✅ STEP 3: Edge Reinforcement
         if config.get('edge_reinforcement', {}).get('enabled', False):
             print(f"\n🖋️ STEP 2: Edge Detection e Reinforcement")
             er_config = config['edge_reinforcement']
@@ -248,7 +264,7 @@ class PanelPreProcessor:
                 current_image = reinforced_img
                 print(f"✅ Edge reinforcement applicato")
         
-        # ✅ STEP 3: Contrast Enhancement (CLAHE)
+        # ✅ STEP 4: Contrast Enhancement (CLAHE)
         if config.get('contrast_enhancement', {}).get('enabled', False):
             print(f"\n🎨 STEP 3: Contrast Enhancement (CLAHE)")
             ce_config = config['contrast_enhancement']
@@ -587,6 +603,165 @@ class PanelPreProcessor:
         
         plt.tight_layout()
         plt.show()
+        
+    def screentone_normalization(self, image_input, output_path=None, 
+                             fft_threshold=1.5, median_kernel_size=11,
+                             preserve_rgb=True):
+        """
+        ✨ Normalizza i retini (screentones) usando analisi in frequenza (FFT).
+        
+        Detecta pattern periodici (retini) e li normalizza con un filtro mediano
+        per trasformarli in aree di grigio più uniformi.
+        
+        Args:
+            image_input: Path dell'immagine (str) o oggetto PIL.Image
+            output_path (str): Path output (opzionale)
+            fft_threshold (float): Soglia per rilevare i picchi FFT (più alto = meno sensibile)
+            median_kernel_size (int): Dimensione del kernel per il filtro mediano (deve essere dispari)
+            preserve_rgb (bool): Se True, preserva i colori originali
+            
+        Returns:
+            PIL.Image: Immagine con retini normalizzati
+        """
+        print(f"✨ === SCREENTONE NORMALIZATION ===")
+        print(f"🎛️ FFT threshold: {fft_threshold}")
+        print(f"🎛️ Median kernel: {median_kernel_size}x{median_kernel_size}")
+        
+        try:
+            # ✅ GESTISCI SIA PATH CHE PIL.IMAGE
+            if isinstance(image_input, str):
+                print(f"📸 Input: {image_input}")
+                img_pil = Image.open(image_input)
+            elif hasattr(image_input, 'convert'):
+                print(f"📸 Input: PIL.Image {image_input.size}")
+                img_pil = image_input
+            else:
+                raise ValueError("Input deve essere un path (str) o PIL.Image")
+
+            # Preserva l'immagine RGB originale
+            img_rgb = img_pil.convert('RGB')
+            img_array = np.array(img_rgb)
+            
+            # Converti in grayscale per l'analisi FFT
+            img_gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            
+            # ✅ CALCOLA FFT
+            f = np.fft.fft2(img_gray)
+            fshift = np.fft.fftshift(f)
+            magnitude_spectrum = np.abs(fshift)
+            log_spectrum = np.log1p(magnitude_spectrum)
+            
+            # ✅ ANALISI SPETTRO
+            spectrum_std = np.std(log_spectrum)
+            spectrum_max = np.max(log_spectrum)
+            spectrum_ratio = spectrum_max / np.mean(log_spectrum)
+            
+            print(f"📊 Analisi spettro:")
+            print(f"   - Deviazione standard: {spectrum_std:.2f}")
+            print(f"   - Ratio max/media: {spectrum_ratio:.2f}")
+
+            # ✅ RILEVA PATTERN RETINI
+            has_screentones = spectrum_std > fft_threshold
+            
+            # ✅ MOSTRA ANALISI SPETTRO (se in debug mode)
+            if self.debug_mode:
+                self._show_fft_analysis(img_gray, log_spectrum, spectrum_std)
+
+            # ✅ NORMALIZZAZIONE RETINI
+            if has_screentones:
+                print(f"🎯 Rilevati pattern di retini (std={spectrum_std:.2f} > soglia {fft_threshold})")
+                
+                if preserve_rgb:
+                    # Applica il median filter su ogni canale per preservare i colori
+                    img_normalized = np.zeros_like(img_array)
+                    for i in range(3):
+                        img_normalized[:,:,i] = cv2.medianBlur(img_array[:,:,i], median_kernel_size)
+                    print(f"🎨 Median filter applicato su canali RGB separati")
+                else:
+                    # Applica su scala di grigi e poi riconverti
+                    img_gray_normalized = cv2.medianBlur(img_gray, median_kernel_size)
+                    img_normalized = cv2.cvtColor(img_gray_normalized, cv2.COLOR_GRAY2RGB)
+                    print(f"🎨 Median filter applicato su grayscale")
+                    
+                print(f"🔧 Kernel size: {median_kernel_size}x{median_kernel_size}")
+                
+                # Conversione a PIL Image
+                img_pil_normalized = Image.fromarray(img_normalized)
+                
+                # ✅ VISUALIZZAZIONE COMPARATIVA
+                if self.debug_mode:
+                    self._show_screentone_comparison(img_rgb, img_normalized, 
+                                                f"Screentone Normalization (kernel={median_kernel_size})")
+                
+            else:
+                print(f"⚪ Nessun retino significativo rilevato (std={spectrum_std:.2f} < soglia {fft_threshold})")
+                img_pil_normalized = img_pil.convert('RGB')
+
+            # ✅ SALVATAGGIO (se richiesto)
+            if output_path:
+                img_pil_normalized.save(output_path, 'PNG', quality=95)
+                print(f"💾 Salvato: {output_path}")
+
+            print("✅ Screentone normalization completata!")
+            return img_pil_normalized
+
+        except Exception as e:
+            print(f"❌ Errore durante normalizzazione retini: {e}")
+            return None
+        
+    def _show_screentone_comparison(self, original, normalized, title="Screentone Normalization"):
+        """
+        🖼️ Mostra comparazione visiva della normalizzazione retini
+        """
+        plt.figure(figsize=(12, 6))
+        
+        # Immagine originale
+        plt.subplot(1, 2, 1)
+        plt.imshow(original)
+        plt.title('ORIGINALE\n(con retini)')
+        plt.axis('off')
+        
+        # Immagine normalizzata
+        plt.subplot(1, 2, 2)
+        plt.imshow(normalized)
+        plt.title(f'NORMALIZZATA\n{title}')
+        plt.axis('off')
+        
+        plt.tight_layout()
+        plt.show()
+
+    def _show_fft_analysis(self, img_gray, log_spectrum, spectrum_std):
+        """
+        📊 Mostra l'analisi FFT per il debug dei retini
+        """
+        plt.figure(figsize=(15, 5))
+            
+        # Immagine originale grayscale
+        plt.subplot(1, 3, 1)
+        plt.imshow(img_gray, cmap='gray')
+        plt.title('Grayscale Input')
+        plt.axis('off')
+            
+        # Spettro FFT
+        plt.subplot(1, 3, 2)
+        plt.imshow(log_spectrum, cmap='viridis')
+        plt.colorbar(label='Log Magnitude')
+        plt.title(f'Spettro FFT Log\n(std={spectrum_std:.2f})')
+        plt.axis('off')
+            
+        # Visualizzazione 3D dello spettro
+        ax = plt.subplot(1, 3, 3, projection='3d')
+        y, x = np.mgrid[0:log_spectrum.shape[0], 0:log_spectrum.shape[1]]
+        ax.plot_surface(x, y, log_spectrum, cmap='viridis', 
+                    linewidth=0, antialiased=False, alpha=0.7)
+        ax.set_title('Spettro 3D\n(picchi = pattern periodici)')
+        ax.set_xlabel('X')
+        ax.set_ylabel('Y')
+        ax.set_zlabel('Magnitude')
+            
+        plt.tight_layout()
+        plt.show()
+
 
 def create_manga_preprocessing_config():
     """
@@ -612,6 +787,12 @@ def create_manga_preprocessing_config():
             'blur_before_detection': True,
             'dilate_edges': True,
             'dilate_iterations': 1
+        },
+        'screentone_normalization': {     
+            'enabled': True,
+            'fft_threshold': 1.5,
+            'median_kernel_size': 11,
+            'preserve_rgb': True
         },
         'contrast_enhancement': {
             'enabled': True,
