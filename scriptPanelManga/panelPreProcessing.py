@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 import matplotlib.pyplot as plt
+from rembg import remove as remove_bg  
 
 class PanelPreProcessor:
     """
@@ -208,6 +209,20 @@ class PanelPreProcessor:
         print(f"📸 Input: {image_path}")
         
         current_image = image_path
+        
+        # ✅ NUOVO STEP 0: Character Segmentation (se abilitato)
+        if config.get('character_segmentation', {}).get('enabled', False):
+            print(f"\n👤 STEP 0: Character Segmentation")
+            seg_config = config['character_segmentation']
+            segmented_image = self.segment_character(
+                current_image,
+                model=seg_config.get('model', 'isnet-anime')
+            )
+            if segmented_image:
+                current_image = segmented_image
+                print("✅ Segmentazione applicata come primo passo.")
+            else:
+                print("⚠️ Segmentazione fallita, continuo con l'immagine originale.")
         
         # ✅ STEP 1: Noise Reduction
         if config.get('noise_reduction', {}).get('enabled', False):
@@ -761,6 +776,51 @@ class PanelPreProcessor:
             
         plt.tight_layout()
         plt.show()
+    
+    def segment_character(self, image_input, output_path=None, model='isnet-anime', bg_color=(255, 255, 255, 0)):
+        """
+        👤 Isola il personaggio dallo sfondo usando rembg.
+        
+        Args:
+            image_input: Path dell'immagine (str) o oggetto PIL.Image
+            output_path (str): Path output (opzionale)
+            model (str): Modello da usare per rembg (es. 'isnet-anime', 'u2net')
+            bg_color (tuple): Colore di sfondo da applicare. Default è trasparente.
+
+        Returns:
+            PIL.Image: Immagine con personaggio isolato (in formato RGBA)
+        """
+        print(f"👤 === CHARACTER SEGMENTATION ===")
+        print(f"🎛️ Modello rembg: {model}")
+
+        try:
+            if isinstance(image_input, str):
+                img_pil = Image.open(image_input)
+            elif hasattr(image_input, 'convert'):
+                img_pil = image_input
+            else:
+                raise ValueError("Input deve essere un path (str) o PIL.Image")
+
+            # Rimuove lo sfondo. L'output è già un'immagine PIL in modalità RGBA.
+            img_segmented = remove_bg(img_pil, model_name=model, bgcolor=bg_color)
+            
+            print(f"✅ Segmentazione personaggio completata.")
+
+            if self.debug_mode:
+                self._show_segmentation_comparison(img_pil.convert("RGBA"), img_segmented)
+
+            if output_path:
+                img_segmented.save(output_path, 'PNG')
+                print(f"💾 Salvato personaggio segmentato: {output_path}")
+
+            return img_segmented
+
+        except Exception as e:
+            print(f"❌ Errore durante la segmentazione del personaggio: {e}")
+            # Prova a installare onnxruntime se manca
+            if "No module named 'onnxruntime'" in str(e):
+                print("👉 Prova a eseguire: pip install onnxruntime-gpu")
+            return None
 
 
 def create_manga_preprocessing_config():
@@ -770,7 +830,7 @@ def create_manga_preprocessing_config():
     """
     return {
         'noise_reduction': {
-            'enabled': False,
+            'enabled': True,
             'method': 'bilateral',
             'bilateral_d': 7,
             'bilateral_sigma_color': 75,
@@ -778,7 +838,7 @@ def create_manga_preprocessing_config():
             'preserve_edges': True
         },
         'edge_reinforcement': {
-            'enabled': False,
+            'enabled': True,
             'edge_detection_method': 'combined',
             'canny_low': 50,
             'canny_high': 150,
@@ -789,13 +849,17 @@ def create_manga_preprocessing_config():
             'dilate_iterations': 1
         },
         'screentone_normalization': {     
-            'enabled': True,
+            'enabled': False,
             'fft_threshold': 1.5,
             'median_kernel_size': 11,
             'preserve_rgb': True
         },
+        'character_segmentation': {
+            'enabled': True,
+            'model': 'isnet-anime'  # Modello specifico per anime, molto efficace
+        },
         'contrast_enhancement': {
-            'enabled': False,
+            'enabled': True,
             'clahe_clip_limit': 3.0,
             'clahe_tile_grid': (8, 8),
             'preserve_lines': True,
