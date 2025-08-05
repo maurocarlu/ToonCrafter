@@ -770,7 +770,7 @@ def create_manga_preprocessing_config():
     """
     return {
         'noise_reduction': {
-            'enabled': True,
+            'enabled': False,
             'method': 'bilateral',
             'bilateral_d': 7,
             'bilateral_sigma_color': 75,
@@ -778,7 +778,7 @@ def create_manga_preprocessing_config():
             'preserve_edges': True
         },
         'edge_reinforcement': {
-            'enabled': True,
+            'enabled': False,
             'edge_detection_method': 'combined',
             'canny_low': 50,
             'canny_high': 150,
@@ -795,7 +795,7 @@ def create_manga_preprocessing_config():
             'preserve_rgb': True
         },
         'contrast_enhancement': {
-            'enabled': True,
+            'enabled': False,
             'clahe_clip_limit': 3.0,
             'clahe_tile_grid': (8, 8),
             'preserve_lines': True,
