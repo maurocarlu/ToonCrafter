@@ -778,28 +778,20 @@ class PanelPreProcessor:
     
     def segment_character(self, image_input, output_path=None, model='isnet-anime', bg_color=(255, 255, 255, 0)):
         """
-        👤 Isola il personaggio dallo sfondo usando rembg.
-        
-        Args:
-            image_input: Path dell'immagine (str) o oggetto PIL.Image
-            output_path (str): Path output (opzionale)
-            model (str): Modello da usare per rembg (es. 'isnet-anime', 'u2net')
-            bg_color (tuple): Colore di sfondo da applicare. Default è trasparente.
-
-        Returns:
-            PIL.Image: Immagine con personaggio isolato (in formato RGBA)
+        👤 Isola il personaggio dallo sfondo usando rembg (API v2).
         """
         print(f"👤 === CHARACTER SEGMENTATION ===")
         print(f"🎛️ Modello rembg: {model}")
 
         try:
-            # Import lazy per evitare problemi finché non serve davvero
-            from rembg import remove as remove_bg
+            # Import lazy + session esplicita (evita errori con model_name)
+            from rembg import remove as remove_bg, new_session
+            session = new_session(model)  # es. 'isnet-anime', 'u2net'
         except Exception as e:
             print(f"❌ rembg non disponibile: {e}")
             print("Suggerimento: pip install 'rembg==2.0.56' 'onnxruntime==1.17.3' e riavvia il runtime.")
             return None
-        
+
         try:
             if isinstance(image_input, str):
                 img_pil = Image.open(image_input)
@@ -808,13 +800,16 @@ class PanelPreProcessor:
             else:
                 raise ValueError("Input deve essere un path (str) o PIL.Image")
 
-            # Rimuove lo sfondo. L'output è già un'immagine PIL in modalità RGBA.
-            img_segmented = remove_bg(img_pil, model_name=model, bgcolor=bg_color)
-            
+            # Usa la sessione; niente model_name qui
+            img_segmented = remove_bg(img_pil, session=session, bgcolor=bg_color)
+
             print(f"✅ Segmentazione personaggio completata.")
 
             if self.debug_mode:
-                self._show_segmentation_comparison(img_pil.convert("RGBA"), img_segmented)
+                if hasattr(self, '_show_segmentation_comparison'):
+                    self._show_segmentation_comparison(img_pil.convert("RGBA"), img_segmented)
+                else:
+                    print("   (debug: funzione _show_segmentation_comparison non presente)")
 
             if output_path:
                 img_segmented.save(output_path, 'PNG')
@@ -824,10 +819,32 @@ class PanelPreProcessor:
 
         except Exception as e:
             print(f"❌ Errore durante la segmentazione del personaggio: {e}")
-            # Prova a installare onnxruntime se manca
-            if "No module named 'onnxruntime'" in str(e):
-                print("👉 Prova a eseguire: pip install onnxruntime-gpu")
             return None
+    
+    def _show_segmentation_comparison(self, original_rgba, segmented_rgba):
+        """🖼️ Confronto visivo segmentazione."""
+        try:
+            import matplotlib.pyplot as plt
+        except Exception:
+            print("   (visualizzazione disabilitata: matplotlib non disponibile)")
+            return
+
+        # Garantisce formato RGBA per la visualizzazione
+        try:
+            orig = original_rgba.convert("RGBA")
+        except Exception:
+            orig = Image.fromarray(np.array(original_rgba)).convert("RGBA")
+        try:
+            segm = segmented_rgba.convert("RGBA")
+        except Exception:
+            segm = Image.fromarray(np.array(segmented_rgba)).convert("RGBA")
+
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1); plt.imshow(orig); plt.title("Originale"); plt.axis("off")
+        plt.subplot(1, 2, 2); plt.imshow(segm); plt.title("Segmentato"); plt.axis("off")
+        plt.tight_layout(); plt.show()
+    
+    
 
 
 def create_manga_preprocessing_config():
