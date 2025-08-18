@@ -12,9 +12,16 @@ from pathlib import Path
 import time
 import tempfile
 import shutil
-from PIL import Image
-import matplotlib.pyplot as plt  # ✅ AGGIUNTO PER VISUALIZZAZIONE
+from PIL import Image  
 from panelPreProcessing import PanelPreProcessor, create_manga_preprocessing_config
+
+try:
+    import matplotlib.pyplot as plt
+except Exception:
+    plt = None
+    print("ℹ️ Matplotlib non disponibile (probabile conflitto NumPy). Visualizzazioni disabilitate.")
+
+
 
 class ColabMangaToonCrafterRunner:
     """

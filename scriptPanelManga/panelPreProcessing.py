@@ -8,7 +8,6 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 import matplotlib.pyplot as plt
-from rembg import remove as remove_bg  
 
 class PanelPreProcessor:
     """
@@ -793,6 +792,14 @@ class PanelPreProcessor:
         print(f"👤 === CHARACTER SEGMENTATION ===")
         print(f"🎛️ Modello rembg: {model}")
 
+        try:
+            # Import lazy per evitare problemi finché non serve davvero
+            from rembg import remove as remove_bg
+        except Exception as e:
+            print(f"❌ rembg non disponibile: {e}")
+            print("Suggerimento: pip install 'rembg==2.0.56' 'onnxruntime==1.17.3' e riavvia il runtime.")
+            return None
+        
         try:
             if isinstance(image_input, str):
                 img_pil = Image.open(image_input)
