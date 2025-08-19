@@ -245,7 +245,7 @@ class ColabMangaToonCrafterRunner:
                 "--frame_stride", str(custom_params['frame_stride']),
                 "--timestep_spacing", "uniform",
                 "--guidance_rescale", str(custom_params['guidance_rescale']),
-                #"--perframe_ae",
+                "--perframe_ae",
                 "--interp"
             ]
             
