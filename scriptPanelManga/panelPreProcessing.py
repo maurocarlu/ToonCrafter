@@ -427,21 +427,19 @@ class PanelPreProcessor:
                 edges_combined = cv2.dilate(edges_combined, kernel, iterations=dilate_iterations)
                 print(f"🔧 Edges dilatati: {dilate_iterations} iterazioni")
             
-            # ✅ REINFORCEMENT: BLEND CON IMMAGINE ORIGINALE
-            # Converti edges in RGB per il blend
-            edges_rgb = cv2.cvtColor(edges_combined, cv2.COLOR_GRAY2RGB)
-            
-            # Normalizza edges (0-1)
-            edges_normalized = edges_rgb.astype(np.float32) / 255.0
-            img_normalized = img_array.astype(np.float32) / 255.0
-            
-            # REINFORCEMENT: Scurisci le aree di edge
-            # Formula: img_reinforced = img_original - (edges * reinforcement_strength)
-            img_reinforced = img_normalized - (edges_normalized * reinforcement_strength)
-            
-            # Clamp values 0-1 e converti back a uint8
-            img_reinforced = np.clip(img_reinforced, 0, 1)
-            img_reinforced = (img_reinforced * 255).astype(np.uint8)
+            # ✅ REINFORCEMENT su luminanza (LAB) — sostituisce il blend RGB precedente
+            img_lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+            L, A, B = cv2.split(img_lab)
+
+            edges_f = (edges_combined.astype(np.float32) / 255.0)
+            L_f = L.astype(np.float32) / 255.0
+
+            L_reinf = L_f - (edges_f * reinforcement_strength)
+            L_reinf = np.clip(L_reinf, 0.0, 1.0)
+            L_reinf_u8 = (L_reinf * 255).astype(np.uint8)
+
+            img_lab_reinf = cv2.merge([L_reinf_u8, A, B])
+            img_reinforced = cv2.cvtColor(img_lab_reinf, cv2.COLOR_LAB2RGB)
             
             # ✅ CONVERSIONE IN PIL IMAGE
             img_pil_reinforced = Image.fromarray(img_reinforced)
@@ -869,25 +867,25 @@ def create_manga_preprocessing_config():
             'canny_low': 50,
             'canny_high': 150,
             'sobel_threshold': 100,
-            'reinforcement_strength': 0.3,
+            'reinforcement_strength': 0.15,
             'blur_before_detection': True,
             'dilate_edges': True,
-            'dilate_iterations': 1
+            'dilate_iterations': 0
         },
         'screentone_normalization': {     
-            'enabled': False,
+            'enabled': True,
             'fft_threshold': 1.5,
             'median_kernel_size': 11,
             'preserve_rgb': True
         },
         'character_segmentation': {
-            'enabled': True,
+            'enabled': False,
             'model': 'u2net'
         },
         'contrast_enhancement': {
             'enabled': True,
-            'clahe_clip_limit': 3.0,
-            'clahe_tile_grid': (8, 8),
+            'clahe_clip_limit': 2.0,
+            'clahe_tile_grid': (4, 4),
             'preserve_lines': True,
             'line_threshold': 0.1
         }

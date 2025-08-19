@@ -51,18 +51,19 @@ class ColabMangaToonCrafterRunner:
                 print(f"   🔄 Convertito da {original_mode} a RGB")
 
             # === LETTERBOX (preserva aspect ratio) ===
+            # === SCALE + CENTER-CROP (no padding, no stretch) ===
             ow, oh = original_img.size
-            scale = min(target_width / ow, target_height / oh)
-            nw, nh = int(ow * scale), int(oh * scale)
-            img_scaled = original_img.resize((nw, nh), Image.Resampling.LANCZOS)
+            scale = max(target_width / ow, target_height / oh)  # copri interamente il canvas
+            rw, rh = int(round(ow * scale)), int(round(oh * scale))
+            img_scaled = original_img.resize((rw, rh), Image.Resampling.LANCZOS)
 
-            canvas = Image.new('RGB', (target_width, target_height), (255, 255, 255))
-            left = (target_width - nw) // 2
-            top = (target_height - nh) // 2
-            canvas.paste(img_scaled, (left, top))
-            img_rescaled = canvas  # finale 512x320 con padding
+            left = max(0, (rw - target_width) // 2)
+            top = max(0, (rh - target_height) // 2)
+            right = left + target_width
+            bottom = top + target_height
+            img_rescaled = img_scaled.crop((left, top, right, bottom))
             rescaled_size = img_rescaled.size
-            print(f"   📐 LETTERBOX - Dimensioni: {rescaled_size[0]}x{rescaled_size[1]} (RGB), scale={scale:.3f}, pad=({left},{top})")
+            print(f"   📐 CENTER-CROP - {rescaled_size[0]}x{rescaled_size[1]} (scale={scale:.3f}, crop=({left},{top}))")
 
             if show_images and plt is not None:
                 print(f"   🖼️ VISUALIZZAZIONE 1: Pre vs Post Letterbox")
@@ -237,12 +238,12 @@ class ColabMangaToonCrafterRunner:
                 "--width", "512",
                 "--unconditional_guidance_scale", str(custom_params['unconditional_guidance_scale']),
                 "--ddim_steps", str(custom_params['ddim_steps']),
-                "--ddim_eta", "1.0",
+                "--ddim_eta", "0.0",
                 "--prompt_dir", temp_input_dir,  # ✅ USA DIRECTORY TEMPORANEA
                 "--text_input",
                 "--video_length", str(custom_params['video_length']),
                 "--frame_stride", str(custom_params['frame_stride']),
-                "--timestep_spacing", "uniform_trailing",
+                "--timestep_spacing", "uniform",
                 "--guidance_rescale", str(custom_params['guidance_rescale']),
                 "--perframe_ae",
                 "--interp"
