@@ -50,12 +50,10 @@ class PanelPreProcessor:
         try:
             # ✅ GESTISCI SIA PATH CHE PIL.IMAGE (AGGIUNTO)
             if isinstance(image_input, str):
-                # È un path di file
                 print(f"📸 Input: {image_input}")
                 with Image.open(image_input) as img:
                     img_rgb = img.convert('RGB')
             elif hasattr(image_input, 'convert'):
-                # È un oggetto PIL.Image
                 print(f"📸 Input: PIL.Image {image_input.size}")
                 img_rgb = image_input.convert('RGB')
             else:
@@ -544,15 +542,12 @@ class PanelPreProcessor:
             
             # Edge preservation enhancement
             if preserve_edges:
-                # Detecta edges per preservarli
                 gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
                 edges = cv2.Canny(gray, 50, 150)
-                
-                # Blend conservativo sulle edges
                 edge_mask = (edges > 0)
                 for channel in range(3):
                     img_denoised[edge_mask, channel] = (
-                        0.7 * img_array[edge_mask, channel] + 
+                        0.7 * img_array[edge_mask, channel] +
                         0.3 * img_denoised[edge_mask, channel]
                     )
                 print(f"🛡️ Edge preservation applicato")
@@ -681,37 +676,31 @@ class PanelPreProcessor:
             if self.debug_mode:
                 self._show_fft_analysis(img_gray, log_spectrum, spectrum_std)
 
-            # ✅ NORMALIZZAZIONE RETINI
             if has_screentones:
-                print(f"🎯 Rilevati pattern di retini (std={spectrum_std:.2f} > soglia {fft_threshold})")
-                
+                # Median sul grayscale per spegnere il pattern periodico
+                if median_kernel_size % 2 == 0:
+                    median_kernel_size += 1
+                gray_med = cv2.medianBlur(img_gray, median_kernel_size)
+
                 if preserve_rgb:
-                    # Applica il median filter su ogni canale per preservare i colori
-                    img_normalized = np.zeros_like(img_array)
-                    for i in range(3):
-                        img_normalized[:,:,i] = cv2.medianBlur(img_array[:,:,i], median_kernel_size)
-                    print(f"🎨 Median filter applicato su canali RGB separati")
+                    # Sostituisci luminanza (LAB) con il gray normalizzato
+                    img_lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+                    l, a, b = cv2.split(img_lab)
+                    l_new = cv2.normalize(gray_med, None, 0, 255, cv2.NORM_MINMAX).astype(l.dtype)
+                    img_lab_new = cv2.merge([l_new, a, b])
+                    img_normalized = cv2.cvtColor(img_lab_new, cv2.COLOR_LAB2RGB)
                 else:
-                    # Applica su scala di grigi e poi riconverti
-                    img_gray_normalized = cv2.medianBlur(img_gray, median_kernel_size)
-                    img_normalized = cv2.cvtColor(img_gray_normalized, cv2.COLOR_GRAY2RGB)
-                    print(f"🎨 Median filter applicato su grayscale")
-                    
-                print(f"🔧 Kernel size: {median_kernel_size}x{median_kernel_size}")
-                
-                # Conversione a PIL Image
+                    img_normalized = cv2.cvtColor(gray_med, cv2.COLOR_GRAY2RGB)
+
                 img_pil_normalized = Image.fromarray(img_normalized)
-                
-                # ✅ VISUALIZZAZIONE COMPARATIVA
-                if self.debug_mode:
+
+                if self.debug_mode and hasattr(self, '_show_screentone_comparison'):
                     self._show_screentone_comparison(img_rgb, img_normalized, 
-                                                f"Screentone Normalization (kernel={median_kernel_size})")
-                
+                        f"Screentone Normalization (kernel={median_kernel_size})")
             else:
                 print(f"⚪ Nessun retino significativo rilevato (std={spectrum_std:.2f} < soglia {fft_threshold})")
                 img_pil_normalized = img_pil.convert('RGB')
 
-            # ✅ SALVATAGGIO (se richiesto)
             if output_path:
                 img_pil_normalized.save(output_path, 'PNG', quality=95)
                 print(f"💾 Salvato: {output_path}")
@@ -776,17 +765,16 @@ class PanelPreProcessor:
         plt.tight_layout()
         plt.show()
     
-    def segment_character(self, image_input, output_path=None, model='isnet-anime', bg_color=(255, 255, 255, 0)):
+    def segment_character(self, image_input, output_path=None, model='u2net', bg_color=(255, 255, 255, 0)):
         """
-        👤 Isola il personaggio dallo sfondo usando rembg (API v2).
+        👤 Segmentazione personaggio (rembg) con post-processing della maschera.
+        Modelli suggeriti per manga B/W: 'u2net' o 'isnet-general-use'.
         """
         print(f"👤 === CHARACTER SEGMENTATION ===")
         print(f"🎛️ Modello rembg: {model}")
-
         try:
-            # Import lazy + session esplicita (evita errori con model_name)
             from rembg import remove as remove_bg, new_session
-            session = new_session(model)  # es. 'isnet-anime', 'u2net'
+            session = new_session(model)
         except Exception as e:
             print(f"❌ rembg non disponibile: {e}")
             print("Suggerimento: pip install 'rembg==2.0.56' 'onnxruntime==1.17.3' e riavvia il runtime.")
@@ -794,22 +782,36 @@ class PanelPreProcessor:
 
         try:
             if isinstance(image_input, str):
-                img_pil = Image.open(image_input)
+                img_pil = Image.open(image_input).convert("RGBA")
             elif hasattr(image_input, 'convert'):
-                img_pil = image_input
+                img_pil = image_input.convert("RGBA")
             else:
                 raise ValueError("Input deve essere un path (str) o PIL.Image")
 
-            # Usa la sessione; niente model_name qui
-            img_segmented = remove_bg(img_pil, session=session, bgcolor=bg_color)
+            # Segmentazione
+            seg_rgba = remove_bg(img_pil, session=session, bgcolor=bg_color)
+
+            # Post-processing maschera (migliora bordi su line art)
+            import numpy as np, cv2
+            seg = np.array(seg_rgba)
+            alpha = seg[:, :, 3]
+
+            # Threshold + morfologia (chiudi buchi piccoli, rimuovi puntinato retini)
+            _, mask = cv2.threshold(alpha, 200, 255, cv2.THRESH_BINARY)
+            kernel = np.ones((3, 3), np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+            # Feather leggero per evitare contorni duri
+            mask_blur = cv2.GaussianBlur(mask, (3, 3), 0)
+
+            # Applica nuova alpha
+            seg[:, :, 3] = mask_blur
+            img_segmented = Image.fromarray(seg)
 
             print(f"✅ Segmentazione personaggio completata.")
-
-            if self.debug_mode:
-                if hasattr(self, '_show_segmentation_comparison'):
-                    self._show_segmentation_comparison(img_pil.convert("RGBA"), img_segmented)
-                else:
-                    print("   (debug: funzione _show_segmentation_comparison non presente)")
+            if self.debug_mode and hasattr(self, '_show_segmentation_comparison'):
+                self._show_segmentation_comparison(img_pil, img_segmented)
 
             if output_path:
                 img_segmented.save(output_path, 'PNG')
@@ -880,7 +882,7 @@ def create_manga_preprocessing_config():
         },
         'character_segmentation': {
             'enabled': True,
-            'model': 'isnet-anime'  # Modello specifico per anime, molto efficace
+            'model': 'u2net'
         },
         'contrast_enhancement': {
             'enabled': True,

@@ -40,47 +40,41 @@ class ColabMangaToonCrafterRunner:
         🎨 Con preprocessing opzionale e visualizzazioni separate
         """
         try:
-            # ✅ STEP 1: CARICA IMMAGINE ORIGINALE E RESCALA
             original_img = Image.open(image_path)
             original_size = original_img.size
             original_mode = original_img.mode
-            
             print(f"   📸 File: {os.path.basename(image_path)}")
             print(f"   📐 ORIGINALE - Dimensioni: {original_size[0]}x{original_size[1]} ({original_mode})")
-            
-            # Converti in RGB se necessario
+
             if original_img.mode != 'RGB':
                 original_img = original_img.convert('RGB')
                 print(f"   🔄 Convertito da {original_mode} a RGB")
-            
-            # Ridimensiona al formato ToonCrafter
-            img_rescaled = original_img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+            # === LETTERBOX (preserva aspect ratio) ===
+            ow, oh = original_img.size
+            scale = min(target_width / ow, target_height / oh)
+            nw, nh = int(ow * scale), int(oh * scale)
+            img_scaled = original_img.resize((nw, nh), Image.Resampling.LANCZOS)
+
+            canvas = Image.new('RGB', (target_width, target_height), (255, 255, 255))
+            left = (target_width - nw) // 2
+            top = (target_height - nh) // 2
+            canvas.paste(img_scaled, (left, top))
+            img_rescaled = canvas  # finale 512x320 con padding
             rescaled_size = img_rescaled.size
-            
-            print(f"   📐 RESCALED - Dimensioni: {rescaled_size[0]}x{rescaled_size[1]} (RGB)")
-            
-            # ✅ VISUALIZZAZIONE 1: ORIGINALE vs RESCALED
-            if show_images:
-                print(f"   🖼️ VISUALIZZAZIONE 1: Pre vs Post Rescaling")
+            print(f"   📐 LETTERBOX - Dimensioni: {rescaled_size[0]}x{rescaled_size[1]} (RGB), scale={scale:.3f}, pad=({left},{top})")
+
+            if show_images and plt is not None:
+                print(f"   🖼️ VISUALIZZAZIONE 1: Pre vs Post Letterbox")
                 plt.figure(figsize=(10, 5))
-                
-                # Originale
-                plt.subplot(1, 2, 1)
-                plt.imshow(original_img)
-                plt.title(f'ORIGINALE\n{original_size[0]}x{original_size[1]}')
-                plt.axis('off')
-                
-                # Rescaled
-                plt.subplot(1, 2, 2)
-                plt.imshow(img_rescaled)
-                plt.title(f'POST-RESCALING\n{rescaled_size[0]}x{rescaled_size[1]}')
-                plt.axis('off')
-                
-                plt.tight_layout()
-                plt.show()
-            
-            # ✅ STEP 2: PREPROCESSING (se abilitato)
-            final_image = img_rescaled  # Default: usa l'immagine rescaled
+                plt.subplot(1, 2, 1); plt.imshow(original_img); plt.title(f'ORIGINALE\n{original_size[0]}x{original_size[1]}'); plt.axis('off')
+                plt.subplot(1, 2, 2); plt.imshow(img_rescaled); plt.title(f'LETTERBOX\n{rescaled_size[0]}x{rescaled_size[1]}'); plt.axis('off')
+                plt.tight_layout(); plt.show()
+            elif show_images:
+                print("   (visualizzazione disabilitata: matplotlib non disponibile)")
+
+            # Preprocessing opzionale (usa img_rescaled come input)
+            final_image = img_rescaled
             
             # ✅ PREPROCESSING CON CONFIGURAZIONE UNICA
             if apply_preprocessing:
