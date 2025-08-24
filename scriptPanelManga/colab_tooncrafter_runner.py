@@ -146,7 +146,8 @@ class ColabMangaToonCrafterRunner:
             return False
     
     def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir, 
-                                       show_resize=True, enable_preprocessing=True, preprocessing_config=None):
+                                       show_resize=True, enable_preprocessing=True, preprocessing_config=None,
+                                       lora_path=None):
         """
         🎛️ Esecuzione con parametri completamente personalizzati + rescaling automatico
         🎨 NUOVO: Con preprocessing opzionale
@@ -227,27 +228,29 @@ class ColabMangaToonCrafterRunner:
             final_output_dir = os.path.join(output_dir, name)
             
             cmd = [
-                "python3", str(inference_script),
-                "--seed", str(seed),
-                "--ckpt_path", str(checkpoint),
-                "--config", str(base_config),
-                "--savedir", str(final_output_dir),
-                "--n_samples", "1",
-                "--bs", "1", 
-                "--height", "320", 
-                "--width", "512",
-                "--unconditional_guidance_scale", str(custom_params['unconditional_guidance_scale']),
-                "--ddim_steps", str(custom_params['ddim_steps']),
-                "--ddim_eta", "0.0",
-                "--prompt_dir", temp_input_dir,  # ✅ USA DIRECTORY TEMPORANEA
-                "--text_input",
-                "--video_length", str(custom_params['video_length']),
-                "--frame_stride", str(custom_params['frame_stride']),
-                "--timestep_spacing", "uniform",
-                "--guidance_rescale", str(custom_params['guidance_rescale']),
-                "--perframe_ae",
-                "--interp"
-            ]
+            "python3", str(inference_script),
+            "--seed", str(seed),
+            "--ckpt_path", str(checkpoint),
+            "--config", str(base_config),
+            "--savedir", str(final_output_dir),
+            "--n_samples", "1",
+            "--bs", "1", 
+            "--height", "320", 
+            "--width", "512",
+            "--unconditional_guidance_scale", str(custom_params['unconditional_guidance_scale']),
+            "--ddim_steps", str(custom_params['ddim_steps']),
+            "--ddim_eta", "0.0",
+            "--prompt_dir", temp_input_dir,
+            "--text_input",
+            "--video_length", str(custom_params['video_length']),
+            "--frame_stride", str(custom_params['frame_stride']),
+            "--timestep_spacing", "uniform",
+            "--guidance_rescale", str(custom_params['guidance_rescale']),
+            "--perframe_ae",
+            "--interp"
+        ]
+            if lora_path:
+                cmd += ["--lora_path", str(lora_path)]
             
             # OUTPUT DETTAGLIATO
             print(f"📝 PROMPT: '{prompt}'")

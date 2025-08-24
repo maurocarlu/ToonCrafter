@@ -1,10 +1,14 @@
-import argparse, os, sys, glob
-import datetime, time
+import argparse
+import os
+import sys
+import glob
+import datetime
+import time
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from einops import rearrange, repeat
 from collections import OrderedDict
-
+import argparse
 import torch
 import torchvision
 import torchvision.transforms as transforms
@@ -52,13 +56,8 @@ def load_model_checkpoint(model, ckpt):
     return model
 
 def load_prompts(prompt_file):
-    f = open(prompt_file, 'r')
-    prompt_list = []
-    for idx, line in enumerate(f.readlines()):
-        l = line.strip()
-        if len(l) != 0:
-            prompt_list.append(l)
-        f.close()
+    with open(prompt_file, 'r') as f:
+        prompt_list = [l.strip() for l in f.readlines() if l.strip()]
     return prompt_list
 
 def load_data_prompts(data_dir, video_size=(256,256), video_frames=16, interp=False):
@@ -281,14 +280,26 @@ def run_inference(args, gpu_num, gpu_no):
     ## model config
     config = OmegaConf.load(args.config)
     model_config = config.pop("model", OmegaConf.create())
-    
-    ## set use_checkpoint as False as when using deepspeed, it encounters an error "deepspeed backend not set"
     model_config['params']['unet_config']['params']['use_checkpoint'] = False
     model = instantiate_from_config(model_config)
     model = model.cuda(gpu_no)
     model.perframe_ae = args.perframe_ae
     assert os.path.exists(args.ckpt_path), "Error: checkpoint Not Found!"
     model = load_model_checkpoint(model, args.ckpt_path)
+
+    # --- LoRA: iniezione e caricamento opzionale ---
+    if args.lora_path:
+        print(f"[LoRA] Carico LoRA da: {args.lora_path}")
+        inject_lora_in_attn(model, r=args.lora_rank, alpha=args.lora_alpha, dropout=0.0)
+        try:
+            import safetensors.torch as st
+            lora_sd = st.load_file(args.lora_path, device="cpu")
+        except Exception:
+            lora_sd = torch.load(args.lora_path, map_location="cpu")
+        missing, unexpected = model.load_state_dict(lora_sd, strict=False)
+        print(f"[LoRA] Stato caricato (missing={len(missing)}, unexpected={len(unexpected)})")
+    # --- fine LoRA ---
+
     model.eval()
 
     ## run over data
@@ -344,42 +355,79 @@ def run_inference(args, gpu_num, gpu_no):
     print(f"Saved in {args.savedir}. Time used: {(time.time() - start):.2f} seconds")
 
 
-def get_parser():
+# --- LoRA support (iniezione nelle attenzioni) ---
+import torch.nn as nn
+
+class LoRALinear(nn.Module):
+    def __init__(self, base_linear: nn.Linear, r=8, alpha=1.0, dropout=0.0):
+        super().__init__()
+        self.base = base_linear
+        for p in self.base.parameters():
+            p.requires_grad = False
+        self.in_features = base_linear.in_features
+        self.out_features = base_linear.out_features
+        self.r = int(r); self.alpha = float(alpha)
+        self.scaling = self.alpha / max(1, self.r)
+        self.dropout = nn.Dropout(dropout) if dropout and dropout > 0 else nn.Identity()
+        self.lora_A = nn.Linear(self.in_features, self.r, bias=False)
+        self.lora_B = nn.Linear(self.r, self.out_features, bias=False)
+        nn.init.kaiming_uniform_(self.lora_A.weight, a=5**0.5)
+        nn.init.zeros_(self.lora_B.weight)
+    def forward(self, x):
+        return self.base(x) + self.lora_B(self.lora_A(self.dropout(x))) * self.scaling
+
+def inject_lora_in_attn(model: nn.Module, r=8, alpha=1.0, dropout=0.0, target=('to_q','to_k','to_v','to_out')):
+    n=0
+    for _, m in model.named_modules():
+        for t in target:
+            if hasattr(m, t):
+                lin = getattr(m, t)
+                if isinstance(lin, nn.Linear) and not isinstance(lin, LoRALinear):
+                    lora = LoRALinear(lin, r=r, alpha=alpha, dropout=dropout)
+                    dev, dt = lin.weight.device, lin.weight.dtype
+                    lora = lora.to(device=dev, dtype=dt)
+                    setattr(m, t, lora)
+                    n += 1
+    print(f"[LoRA] Iniettati {n} layer LoRA")
+    return n
+# --- fine LoRA support ---
+
+def build_argparser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--savedir", type=str, default=None, help="results saving path")
     parser.add_argument("--ckpt_path", type=str, default=None, help="checkpoint path")
     parser.add_argument("--config", type=str, help="config (yaml) path")
     parser.add_argument("--prompt_dir", type=str, default=None, help="a data dir containing videos and prompts")
-    parser.add_argument("--n_samples", type=int, default=1, help="num of samples per prompt",)
-    parser.add_argument("--ddim_steps", type=int, default=50, help="steps of ddim if positive, otherwise use DDPM",)
-    parser.add_argument("--ddim_eta", type=float, default=1.0, help="eta for ddim sampling (0.0 yields deterministic sampling)",)
+    parser.add_argument("--n_samples", type=int, default=1, help="num of samples per prompt")
+    parser.add_argument("--ddim_steps", type=int, default=50, help="steps of ddim")
+    parser.add_argument("--ddim_eta", type=float, default=1.0, help="eta for ddim sampling")
     parser.add_argument("--bs", type=int, default=1, help="batch size for inference, should be one")
-    parser.add_argument("--height", type=int, default=512, help="image height, in pixel space")
-    parser.add_argument("--width", type=int, default=512, help="image width, in pixel space")
-    parser.add_argument("--frame_stride", type=int, default=3, help="frame stride control for 256 model (larger->larger motion), FPS control for 512 or 1024 model (smaller->larger motion)")
-    parser.add_argument("--unconditional_guidance_scale", type=float, default=1.0, help="prompt classifier-free guidance")
-    parser.add_argument("--seed", type=int, default=123, help="seed for seed_everything")
-    parser.add_argument("--video_length", type=int, default=16, help="inference video length")
-    parser.add_argument("--negative_prompt", action='store_true', default=False, help="negative prompt")
-    parser.add_argument("--text_input", action='store_true', default=False, help="input text to I2V model or not")
-    parser.add_argument("--multiple_cond_cfg", action='store_true', default=False, help="use multi-condition cfg or not")
-    parser.add_argument("--cfg_img", type=float, default=None, help="guidance scale for image conditioning")
-    parser.add_argument("--timestep_spacing", type=str, default="uniform", help="The way the timesteps should be scaled. Refer to Table 2 of the [Common Diffusion Noise Schedules and Sample Steps are Flawed](https://huggingface.co/papers/2305.08891) for more information.")
-    parser.add_argument("--guidance_rescale", type=float, default=0.0, help="guidance rescale in [Common Diffusion Noise Schedules and Sample Steps are Flawed](https://huggingface.co/papers/2305.08891)")
-    parser.add_argument("--perframe_ae", action='store_true', default=False, help="if we use per-frame AE decoding, set it to True to save GPU memory, especially for the model of 576x1024")
-
-    ## currently not support looping video and generative frame interpolation
-    parser.add_argument("--loop", action='store_true', default=False, help="generate looping videos or not")
-    parser.add_argument("--interp", action='store_true', default=False, help="generate generative frame interpolation or not")
+    parser.add_argument("--height", type=int, default=512)
+    parser.add_argument("--width", type=int, default=512)
+    parser.add_argument("--frame_stride", type=int, default=3)
+    parser.add_argument("--unconditional_guidance_scale", type=float, default=1.0)
+    parser.add_argument("--seed", type=int, default=123)
+    parser.add_argument("--video_length", type=int, default=16)
+    parser.add_argument("--negative_prompt", action='store_true', default=False)
+    parser.add_argument("--text_input", action='store_true', default=False)
+    parser.add_argument("--multiple_cond_cfg", action='store_true', default=False)
+    parser.add_argument("--cfg_img", type=float, default=None)
+    parser.add_argument("--timestep_spacing", type=str, default="uniform")
+    parser.add_argument("--guidance_rescale", type=float, default=0.0)
+    parser.add_argument("--perframe_ae", action='store_true', default=False)
+    parser.add_argument("--loop", action='store_true', default=False)
+    parser.add_argument("--interp", action='store_true', default=False)
+    # LoRA (unificato)
+    parser.add_argument("--lora_path", type=str, default=None, help="Path ai pesi LoRA (.safetensors o .pt)")
+    parser.add_argument("--lora_rank", type=int, default=8)
+    parser.add_argument("--lora_alpha", type=float, default=1.0)
     return parser
 
-
-if __name__ == '__main__':
-    now = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    print("@DynamiCrafter cond-Inference: %s"%now)
-    parser = get_parser()
-    args = parser.parse_args()
-    
+def main():
+    args = build_argparser().parse_args()
     seed_everything(args.seed)
-    rank, gpu_num = 0, 1
-    run_inference(args, gpu_num, rank)
+    os.makedirs(args.savedir, exist_ok=True)
+    run_inference(args, gpu_num=1, gpu_no=0)
+
+if __name__ == "__main__":
+    main()
