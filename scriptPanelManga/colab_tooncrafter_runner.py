@@ -147,7 +147,7 @@ class ColabMangaToonCrafterRunner:
     
     def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir, 
                                        show_resize=True, enable_preprocessing=True, preprocessing_config=None,
-                                       lora_path=None):
+                                       lora_path=None, lora_scale=1.0):
         """
         🎛️ Esecuzione con parametri completamente personalizzati + rescaling automatico
         🎨 NUOVO: Con preprocessing opzionale
@@ -250,7 +250,7 @@ class ColabMangaToonCrafterRunner:
             "--interp"
         ]
             if lora_path:
-                cmd += ["--lora_path", str(lora_path)]
+                cmd += ["--lora_path", str(lora_path), "--lora_scale", str(lora_scale)]
             
             # OUTPUT DETTAGLIATO
             print(f"📝 PROMPT: '{prompt}'")

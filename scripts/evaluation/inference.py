@@ -298,6 +298,12 @@ def run_inference(args, gpu_num, gpu_no):
             lora_sd = torch.load(args.lora_path, map_location="cpu")
         missing, unexpected = model.load_state_dict(lora_sd, strict=False)
         print(f"[LoRA] Stato caricato (missing={len(missing)}, unexpected={len(unexpected)})")
+
+        # Imposta la scala runtime (intensità effetto)
+        set_lora_scale(model, args.lora_scale)
+
+        # Diagnostica: norm dei pesi LoRA caricati
+        print_lora_stats(model)
     # --- fine LoRA ---
 
     model.eval()
@@ -368,13 +374,39 @@ class LoRALinear(nn.Module):
         self.out_features = base_linear.out_features
         self.r = int(r); self.alpha = float(alpha)
         self.scaling = self.alpha / max(1, self.r)
+        self.runtime_scale = 1.0  # <--- scala regolabile a runtime
         self.dropout = nn.Dropout(dropout) if dropout and dropout > 0 else nn.Identity()
         self.lora_A = nn.Linear(self.in_features, self.r, bias=False)
         self.lora_B = nn.Linear(self.r, self.out_features, bias=False)
         nn.init.kaiming_uniform_(self.lora_A.weight, a=5**0.5)
         nn.init.zeros_(self.lora_B.weight)
     def forward(self, x):
-        return self.base(x) + self.lora_B(self.lora_A(self.dropout(x))) * self.scaling
+        delta = self.lora_B(self.lora_A(self.dropout(x))) * (self.scaling * self.runtime_scale)
+        return self.base(x) + delta
+
+def set_lora_scale(model: nn.Module, scale: float):
+    n = 0
+    for m in model.modules():
+        if isinstance(m, LoRALinear):
+            m.runtime_scale = float(scale)
+            n += 1
+    print(f"[LoRA] lora_scale impostato a {scale} su {n} layer")
+
+def print_lora_stats(model: nn.Module):
+    total, nz = 0, 0
+    vals = []
+    for name, p in model.named_parameters():
+        if "lora_A" in name or "lora_B" in name:
+            total += 1
+            v = p.detach().abs().mean().item()
+            vals.append(v)
+            if v > 0:
+                nz += 1
+    if total:
+        mean_v = sum(vals)/len(vals)
+        print(f"[LoRA] Parametri LoRA: {total}, non-zero: {nz}, mean(|w|)={mean_v:.6f}")
+    else:
+        print("[LoRA] Nessun parametro LoRA trovato (iniezione mancata?)")
 
 def inject_lora_in_attn(model: nn.Module, r=8, alpha=1.0, dropout=0.0, target=('to_q','to_k','to_v','to_out')):
     n=0
@@ -421,6 +453,7 @@ def build_argparser():
     parser.add_argument("--lora_path", type=str, default=None, help="Path ai pesi LoRA (.safetensors o .pt)")
     parser.add_argument("--lora_rank", type=int, default=8)
     parser.add_argument("--lora_alpha", type=float, default=1.0)
+    parser.add_argument("--lora_scale", type=float, default=1.0)  # <--- nuovo
     return parser
 
 def main():
