@@ -6,6 +6,7 @@ VERSIONE GOOGLE COLAB - ottimizzato per l'ambiente Colab
 
 import os
 import sys
+import shlex
 import subprocess
 import yaml
 from pathlib import Path
@@ -146,8 +147,8 @@ class ColabMangaToonCrafterRunner:
             return False
     
     def run_custom_parameters_conversion(self, base_name, prompt, custom_params, output_dir, input_dir, 
-                                       show_resize=True, enable_preprocessing=True, preprocessing_config=None,
-                                       lora_path=None, lora_scale=1.0):
+                                         show_resize=True, enable_preprocessing=True, preprocessing_config=None,
+                                         lora_path=None, lora_scale=1.0):
         """
         🎛️ Esecuzione con parametri completamente personalizzati + rescaling automatico
         🎨 NUOVO: Con preprocessing opzionale
@@ -228,30 +229,47 @@ class ColabMangaToonCrafterRunner:
             final_output_dir = os.path.join(output_dir, name)
             
             cmd = [
-            "python3", str(inference_script),
-            "--seed", str(seed),
-            "--ckpt_path", str(checkpoint),
-            "--config", str(base_config),
-            "--savedir", str(final_output_dir),
-            "--n_samples", "1",
-            "--bs", "1", 
-            "--height", "320", 
-            "--width", "512",
-            "--unconditional_guidance_scale", str(custom_params['unconditional_guidance_scale']),
-            "--ddim_steps", str(custom_params['ddim_steps']),
-            "--ddim_eta", "0.0",
-            "--prompt_dir", temp_input_dir,
-            "--text_input",
-            "--video_length", str(custom_params['video_length']),
-            "--frame_stride", str(custom_params['frame_stride']),
-            "--timestep_spacing", "uniform",
-            "--guidance_rescale", str(custom_params['guidance_rescale']),
-            "--perframe_ae",
-            "--interp"
-        ]
+                "python3", "-u", str(inference_script),  # <- -u: stdout non bufferizzato
+                "--seed", str(seed),
+                "--ckpt_path", str(checkpoint),
+                "--config", str(base_config),
+                "--savedir", str(final_output_dir),
+                "--n_samples", "1",
+                "--bs", "1",
+                "--height", "320",
+                "--width", "512",
+                "--unconditional_guidance_scale", str(custom_params['unconditional_guidance_scale']),
+                "--ddim_steps", str(custom_params['ddim_steps']),
+                "--ddim_eta", "0.0",
+                "--prompt_dir", temp_input_dir,
+                "--text_input",
+                "--video_length", str(custom_params['video_length']),
+                "--frame_stride", str(custom_params['frame_stride']),
+                "--timestep_spacing", "uniform",
+                "--guidance_rescale", str(custom_params['guidance_rescale']),
+                "--perframe_ae",
+                "--interp"
+            ]
             if lora_path:
                 cmd += ["--lora_path", str(lora_path), "--lora_scale", str(lora_scale)]
-            
+
+            print("🔧 Comando:", " ".join(shlex.quote(c) for c in cmd))
+
+            # --- esecuzione con streaming dello stdout ---
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            try:
+                for line in proc.stdout:
+                    if not line:
+                        break
+                    print(line, end="")  # mostra anche le righe [LoRA] di inference.py
+            finally:
+                proc.stdout.close()
+                rc = proc.wait()
+
+            if rc != 0:
+                print(f"❌ Inference fallita (rc={rc})")
+                return False
+        
             # OUTPUT DETTAGLIATO
             print(f"📝 PROMPT: '{prompt}'")
             print(f"🎛️ PARAMETRI:")
