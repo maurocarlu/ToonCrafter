@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import sys
 import glob
 import datetime
@@ -416,31 +417,123 @@ def _lora_suffix(k: str):
             return k[k.index(t):]  # es. "to_q.lora_A.weight"
     return None
 
+def _norm_kind_from_key(k: str):
+    k = k.replace('/', '.')
+    # cerca varianti comuni: to_q/k/v/out | q_proj | proj_q | out_proj | proj_out
+    patterns = [
+        r'\bto_(q|k|v|out)\b',
+        r'\b(q|k|v)_proj\b',
+        r'\bproj_(q|k|v)\b',
+        r'\bout_proj\b',
+        r'\bproj_out\b',
+    ]
+    for pat in patterns:
+        m = re.search(pat, k)
+        if not m: 
+            continue
+        g = m.group(0)
+        if g in ('out_proj', 'proj_out'):
+            return 'to_out'
+        if 'proj_' in g:
+            return f"to_{g.split('_',1)[1]}"
+        if '_proj' in g:
+            return f"to_{g.split('_',1)[0]}"
+        if g.startswith('to_'):
+            return g
+    return None
+
+def _is_lora_A(k: str): return k.endswith('lora_A.weight')
+def _is_lora_B(k: str): return k.endswith('lora_B.weight')
+
 def remap_lora_keys_for_model(model: torch.nn.Module, sd: dict):
-    # indicizza i parametri LoRA presenti nel modello per suffisso
-    model_lora_keys = [k for k in model.state_dict().keys() if ("lora_A" in k or "lora_B" in k)]
-    suffix_index = {}
-    for mk in model_lora_keys:
-        s = _lora_suffix(mk)
-        if s:
-            suffix_index.setdefault(s, []).append(mk)
+    mstate = model.state_dict()
+
+    # indicizza chiavi LoRA del modello per kind (to_q/k/v/out) e tipo (A/B)
+    model_A = {'to_q':[], 'to_k':[], 'to_v':[], 'to_out':[]}
+    model_B = {'to_q':[], 'to_k':[], 'to_v':[], 'to_out':[]}
+    for mk in mstate.keys():
+        if ('lora_A.weight' in mk) or ('lora_B.weight' in mk):
+            kind = _norm_kind_from_key(mk)
+            if not kind: 
+                continue
+            if 'lora_A.weight' in mk:
+                model_A[kind].append(mk)
+            else:
+                model_B[kind].append(mk)
+
+    # indicizza chiavi nel file LoRA per kind e tipo
+    sd_A = {'to_q':[], 'to_k':[], 'to_v':[], 'to_out':[]}
+    sd_B = {'to_q':[], 'to_k':[], 'to_v':[], 'to_out':[]}
+    for sk in sd.keys():
+        if ('lora_A.weight' in sk) or ('lora_B.weight' in sk):
+            kind = _norm_kind_from_key(sk)
+            if not kind: 
+                continue
+            if 'lora_A.weight' in sk:
+                sd_A[kind].append(sk)
+            else:
+                sd_B[kind].append(sk)
+
+    # ordina per shape per stabilizzare il matching
+    def sort_by_shape(keys, source_state):
+        return sorted(keys, key=lambda k: tuple(source_state[k].shape) if k in source_state else tuple(sd[k].shape))
+
+    for k in model_A:
+        model_A[k] = sort_by_shape(model_A[k], mstate)
+        model_B[k] = sort_by_shape(model_B[k], mstate)
+        sd_A[k] = sort_by_shape(sd_A[k], sd)
+        sd_B[k] = sort_by_shape(sd_B[k], sd)
 
     new_sd = {}
     matched = 0
     skipped = 0
-    for sk, v in sd.items():
-        s = _lora_suffix(sk)
-        if not s:
-            skipped += 1
-            continue
-        cands = suffix_index.get(s, [])
-        if len(cands) == 1:
-            new_sd[cands[0]] = v
+
+    # mappa per kind e tipo (A/B) per indice
+    for kind in ('to_q','to_k','to_v','to_out'):
+        nA = min(len(model_A[kind]), len(sd_A[kind]))
+        nB = min(len(model_B[kind]), len(sd_B[kind]))
+        for i in range(nA):
+            new_sd[ model_A[kind][i] ] = sd[ sd_A[kind][i] ]
             matched += 1
-        else:
-            # ambigua o mancante: salta
-            skipped += 1
-    print(f"[LoRA] Remap: matched={matched}, skipped={skipped}, model_lora_params={len(model_lora_keys)}")
+        for i in range(nB):
+            new_sd[ model_B[kind][i] ] = sd[ sd_B[kind][i] ]
+            matched += 1
+        skipped += (len(sd_A[kind]) - nA) + (len(sd_B[kind]) - nB)
+
+    # fallback: se ancora 0, tenta shape-only globale
+    if matched == 0:
+        mA = [mk for mk in mstate.keys() if _is_lora_A(mk)]
+        mB = [mk for mk in mstate.keys() if _is_lora_B(mk)]
+        sA = [sk for sk in sd.keys() if _is_lora_A(sk)]
+        sB = [sk for sk in sd.keys() if _is_lora_B(sk)]
+
+        def group_by_shape(keys, state):
+            g = {}
+            for k in keys:
+                shp = tuple(state[k].shape) if k in state else tuple(sd[k].shape)
+                g.setdefault(shp, []).append(k)
+            return g
+
+        g_mA = group_by_shape(mA, mstate); g_sA = group_by_shape(sA, sd)
+        g_mB = group_by_shape(mB, mstate); g_sB = group_by_shape(sB, sd)
+
+        for shp, mk_list in g_mA.items():
+            sk_list = g_sA.get(shp, [])
+            n = min(len(mk_list), len(sk_list))
+            for i in range(n):
+                new_sd[ mk_list[i] ] = sd[ sk_list[i] ]
+                matched += 1
+            skipped += (len(sk_list) - n)
+
+        for shp, mk_list in g_mB.items():
+            sk_list = g_sB.get(shp, [])
+            n = min(len(mk_list), len(sk_list))
+            for i in range(n):
+                new_sd[ mk_list[i] ] = sd[ sk_list[i] ]
+                matched += 1
+            skipped += (len(sk_list) - n)
+
+    print(f"[LoRA] Remap: matched={matched}, skipped={skipped}, model_lora_params={sum(len(v) for v in model_A.values())+sum(len(v) for v in model_B.values())}")
     return new_sd
 
 
