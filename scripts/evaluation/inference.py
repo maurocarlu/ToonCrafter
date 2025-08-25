@@ -222,6 +222,7 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
     else:
         uc = None
 
+    # prova a passare ref_context; se il decoder non lo supporta, si fa fallback
     additional_decode_kwargs = {'ref_context': hs}
 
     ## we need one more unconditioning image=yes, text=""
@@ -264,15 +265,15 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
             )
 
         # --- Decode UNA SOLA VOLTA e in FP32 per evitare softening ---
-        with torch.cuda.amp.autocast(enabled=False):
-            batch_images = model.decode_first_stage(samples.float(), **additional_decode_kwargs)
+        # --- Decode una sola volta; fallback senza ref_context se necessario ---
+        try:
+            with torch.cuda.amp.autocast(enabled=False):
+                batch_images = model.decode_first_stage(samples.float(), **additional_decode_kwargs)
+        except Exception as e:
+            print(f"[decode] fallback senza ref_context: {e}")
+            with torch.cuda.amp.autocast(enabled=False):
+                batch_images = model.decode_first_stage(samples.float())
 
-        index = list(range(samples.shape[2]))
-        del index[1]
-        del index[-2]
-        samples = samples[:,:,index,:,:]
-        batch_images_middle = model.decode_first_stage(samples, **additional_decode_kwargs)
-        batch_images[:,:,batch_images.shape[2]//2-1:batch_images.shape[2]//2+1] = batch_images_middle[:,:,batch_images.shape[2]//2-2:batch_images.shape[2]//2]
         # niente splice centrale
         batch_variants.append(batch_images)
     ## variants, batch, c, t, h, w
@@ -343,7 +344,7 @@ def run_inference(args, gpu_num, gpu_no):
     filename_list_rank = [filename_list[i] for i in indices]
 
     start = time.time()
-    with torch.no_grad(), torch.cuda.amp.autocast():
+    with torch.no_grad():
         for idx, indice in tqdm(enumerate(range(0, len(prompt_list_rank), args.bs)), desc='Sample Batch'):
             prompts = prompt_list_rank[indice:indice+args.bs]
             videos = data_list_rank[indice:indice+args.bs]
