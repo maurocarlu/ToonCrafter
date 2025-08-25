@@ -229,7 +229,7 @@ class ColabMangaToonCrafterRunner:
             final_output_dir = os.path.join(output_dir, name)
             
             cmd = [
-                "python3", "-u", str(inference_script),  # <- -u: stdout non bufferizzato
+                "python3", "-u", str(inference_script),
                 "--seed", str(seed),
                 "--ckpt_path", str(checkpoint),
                 "--config", str(base_config),
@@ -246,9 +246,9 @@ class ColabMangaToonCrafterRunner:
                 "--video_length", str(custom_params['video_length']),
                 "--frame_stride", str(custom_params['frame_stride']),
                 "--timestep_spacing", "uniform",
-                "--guidance_rescale", str(custom_params['guidance_rescale']),
-                "--perframe_ae",
-                "--interp"
+                "--guidance_rescale", str(custom_params['guidance_rescale'])
+                #"--perframe_ae",
+                #"--interp"
             ]
             if lora_path:
                 cmd += ["--lora_path", str(lora_path), "--lora_scale", str(lora_scale)]
@@ -261,7 +261,7 @@ class ColabMangaToonCrafterRunner:
                 for line in proc.stdout:
                     if not line:
                         break
-                    print(line, end="")  # mostra anche le righe [LoRA] di inference.py
+                    print(line, end="")
             finally:
                 proc.stdout.close()
                 rc = proc.wait()
@@ -269,25 +269,8 @@ class ColabMangaToonCrafterRunner:
             if rc != 0:
                 print(f"❌ Inference fallita (rc={rc})")
                 return False
-        
-            # OUTPUT DETTAGLIATO
-            print(f"📝 PROMPT: '{prompt}'")
-            print(f"🎛️ PARAMETRI:")
-            print(f"   • frame_stride: {custom_params['frame_stride']}")
-            print(f"   • ddim_steps: {custom_params['ddim_steps']}")
-            print(f"   • guidance_scale: {custom_params['unconditional_guidance_scale']}")
-            print(f"   • guidance_rescale: {custom_params['guidance_rescale']}")
-            print(f"   • video_length: {custom_params['video_length']}")
-            print(f"📁 Input: {temp_input_dir} (512x320)")
-            print(f"📁 Output: {final_output_dir}")
-            print(f"🚀 Avviando ToonCrafter...")
-            
-            # DEBUG: Mostra comando completo
-            print(f"🔧 Comando: {' '.join(cmd)}")
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.tooncrafter_path)
-            
-            if result.returncode == 0:
+            # Successo: continua
+            if True:
                 print(f"✅ Conversione completata per '{base_name}'!")
                 
                 # Verifica file generati
