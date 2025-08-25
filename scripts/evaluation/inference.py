@@ -240,35 +240,34 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
         else:
             cond_z0 = None
         if ddim_sampler is not None:
+            samples, _ = ddim_sampler.sample(
+                S=ddim_steps,
+                conditioning=cond,
+                batch_size=batch_size,
+                shape=noise_shape[1:],
+                verbose=False,
+                unconditional_guidance_scale=unconditional_guidance_scale,
+                unconditional_conditioning=uc,
+                eta=ddim_eta,
+                cfg_img=cfg_img, 
+                mask=cond_mask,
+                x0=cond_z0,
+                fs=fs,
+                timestep_spacing=timestep_spacing,
+                guidance_rescale=guidance_rescale,
+                **kwargs
+            )
 
-            samples, _ = ddim_sampler.sample(S=ddim_steps,
-                                            conditioning=cond,
-                                            batch_size=batch_size,
-                                            shape=noise_shape[1:],
-                                            verbose=False,
-                                            unconditional_guidance_scale=unconditional_guidance_scale,
-                                            unconditional_conditioning=uc,
-                                            eta=ddim_eta,
-                                            cfg_img=cfg_img, 
-                                            mask=cond_mask,
-                                            x0=cond_z0,
-                                            fs=fs,
-                                            timestep_spacing=timestep_spacing,
-                                            guidance_rescale=guidance_rescale,
-                                            **kwargs
-                                            )
-
-        ## reconstruct from latent to pixel space
-        batch_images = model.decode_first_stage(samples, **additional_decode_kwargs)
+        # --- Decode UNA SOLA VOLTA e in FP32 per evitare softening ---
+        with torch.cuda.amp.autocast(enabled=False):
+            batch_images = model.decode_first_stage(samples.float(), **additional_decode_kwargs)
 
         index = list(range(samples.shape[2]))
         del index[1]
         del index[-2]
         samples = samples[:,:,index,:,:]
-        ## reconstruct from latent to pixel space
         batch_images_middle = model.decode_first_stage(samples, **additional_decode_kwargs)
         batch_images[:,:,batch_images.shape[2]//2-1:batch_images.shape[2]//2+1] = batch_images_middle[:,:,batch_images.shape[2]//2-2:batch_images.shape[2]//2]
-
 
 
         batch_variants.append(batch_images)
