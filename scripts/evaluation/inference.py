@@ -296,13 +296,15 @@ def run_inference(args, gpu_num, gpu_no):
             lora_sd = st.load_file(args.lora_path, device="cpu")
         except Exception:
             lora_sd = torch.load(args.lora_path, map_location="cpu")
+
+        # --- remap chiavi LoRA per allinearle al modello corrente ---
+        lora_sd = remap_lora_keys_for_model(model, lora_sd)
+
         missing, unexpected = model.load_state_dict(lora_sd, strict=False)
         print(f"[LoRA] Stato caricato (missing={len(missing)}, unexpected={len(unexpected)})")
 
         # Imposta la scala runtime (intensità effetto)
         set_lora_scale(model, args.lora_scale)
-
-        # Diagnostica: norm dei pesi LoRA caricati
         print_lora_stats(model)
     # --- fine LoRA ---
 
@@ -407,6 +409,40 @@ def print_lora_stats(model: nn.Module):
         print(f"[LoRA] Parametri LoRA: {total}, non-zero: {nz}, mean(|w|)={mean_v:.6f}")
     else:
         print("[LoRA] Nessun parametro LoRA trovato (iniezione mancata?)")
+
+def _lora_suffix(k: str):
+    for t in ("to_q.", "to_k.", "to_v.", "to_out."):
+        if t in k:
+            return k[k.index(t):]  # es. "to_q.lora_A.weight"
+    return None
+
+def remap_lora_keys_for_model(model: torch.nn.Module, sd: dict):
+    # indicizza i parametri LoRA presenti nel modello per suffisso
+    model_lora_keys = [k for k in model.state_dict().keys() if ("lora_A" in k or "lora_B" in k)]
+    suffix_index = {}
+    for mk in model_lora_keys:
+        s = _lora_suffix(mk)
+        if s:
+            suffix_index.setdefault(s, []).append(mk)
+
+    new_sd = {}
+    matched = 0
+    skipped = 0
+    for sk, v in sd.items():
+        s = _lora_suffix(sk)
+        if not s:
+            skipped += 1
+            continue
+        cands = suffix_index.get(s, [])
+        if len(cands) == 1:
+            new_sd[cands[0]] = v
+            matched += 1
+        else:
+            # ambigua o mancante: salta
+            skipped += 1
+    print(f"[LoRA] Remap: matched={matched}, skipped={skipped}, model_lora_params={len(model_lora_keys)}")
+    return new_sd
+
 
 def inject_lora_in_attn(model: nn.Module, r=8, alpha=1.0, dropout=0.0, target=('to_q','to_k','to_v','to_out')):
     n=0
