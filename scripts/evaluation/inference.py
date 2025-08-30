@@ -157,14 +157,16 @@ def save_results_seperate(prompt, samples, filename, fakedir, fps=10, loop=False
 def get_latent_z(model, videos):
     b, c, t, h, w = videos.shape
     x = rearrange(videos, 'b c t h w -> (b t) c h w')
-    z = model.encode_first_stage(x)
+    with torch.cuda.amp.autocast(enabled=False):
+        z = model.encode_first_stage(x)
     z = rearrange(z, '(b t) c h w -> b c t h w', b=b, t=t)
     return z
 
 def get_latent_z_with_hidden_states(model, videos):
     b, c, t, h, w = videos.shape
     x = rearrange(videos, 'b c t h w -> (b t) c h w')
-    encoder_posterior, hidden_states = model.first_stage_model.encode(x, return_hidden_states=True)
+    with torch.cuda.amp.autocast(enabled=False):
+        encoder_posterior, hidden_states = model.first_stage_model.encode(x, return_hidden_states=True)
 
     hidden_states_first_last = []
     ### use only the first and last hidden states
@@ -173,12 +175,13 @@ def get_latent_z_with_hidden_states(model, videos):
         hid_new = torch.cat([hid[:, :, 0:1], hid[:, :, -1:]], dim=2)
         hidden_states_first_last.append(hid_new)
 
-    z = model.get_first_stage_encoding(encoder_posterior).detach()
+    with torch.cuda.amp.autocast(enabled=False):
+        z = model.get_first_stage_encoding(encoder_posterior).detach()
     z = rearrange(z, '(b t) c h w -> b c t h w', b=b, t=t)
     return z, hidden_states_first_last
 
 def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddim_steps=50, ddim_eta=1., \
-                        unconditional_guidance_scale=1.0, cfg_img=None, fs=None, text_input=False, multiple_cond_cfg=False, loop=False, interp=False, timestep_spacing='uniform', guidance_rescale=0.0, full_img_cond=False, **kwargs):
+                        unconditional_guidance_scale=1.0, cfg_img=None, fs=None, text_input=False, multiple_cond_cfg=False, loop=False, interp=False, timestep_spacing='uniform', guidance_rescale=0.0, **kwargs):
     ddim_sampler = DDIMSampler(model) if not multiple_cond_cfg else DDIMSampler_multicond(model)
     batch_size = noise_shape[0]
     fs = torch.tensor([fs] * batch_size, dtype=torch.long, device=model.device)
@@ -195,14 +198,9 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
     if model.model.conditioning_key == 'hybrid':
         z, hs = get_latent_z_with_hidden_states(model, videos) # b c t h w
         if loop or interp:
-            if full_img_cond:
-                # forza condizione immagine su T frame (riduce blur centrale)
-                img_cat_cond = z[:,:,:1,:,:]
-                img_cat_cond = repeat(img_cat_cond, 'b c t h w -> b c (repeat t) h w', repeat=z.shape[2])
-            else:
-                img_cat_cond = torch.zeros_like(z)
-                img_cat_cond[:,:,0,:,:] = z[:,:,0,:,:]
-                img_cat_cond[:,:,-1,:,:] = z[:,:,-1,:,:]
+            img_cat_cond = torch.zeros_like(z)
+            img_cat_cond[:,:,0,:,:] = z[:,:,0,:,:]
+            img_cat_cond[:,:,-1,:,:] = z[:,:,-1,:,:]
         else:
             img_cat_cond = z[:,:,:1,:,:]
             img_cat_cond = repeat(img_cat_cond, 'b c t h w -> b c (repeat t) h w', repeat=z.shape[2])
@@ -222,9 +220,7 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
     else:
         uc = None
 
-    # prova a passare ref_context; se il decoder non lo supporta, si fa fallback
     additional_decode_kwargs = {'ref_context': hs}
-
     ## we need one more unconditioning image=yes, text=""
     if multiple_cond_cfg and cfg_img != 1.0:
         uc_2 = {"c_crossattn": [torch.cat([uc_emb,img_emb],dim=1)]}
@@ -264,17 +260,10 @@ def image_guided_synthesis(model, prompts, videos, noise_shape, n_samples=1, ddi
                 **kwargs
             )
 
-        # --- Decode UNA SOLA VOLTA e in FP32 per evitare softening ---
-        # --- Decode una sola volta; fallback senza ref_context se necessario ---
-        try:
-            with torch.cuda.amp.autocast(enabled=False):
-                batch_images = model.decode_first_stage(samples.float(), **additional_decode_kwargs)
-        except Exception as e:
-            print(f"[decode] fallback senza ref_context: {e}")
-            with torch.cuda.amp.autocast(enabled=False):
-                batch_images = model.decode_first_stage(samples.float())
-
-        # niente splice centrale
+        additional_decode_kwargs = {'ref_context': hs}
+        # Decode UNA SOLA VOLTA e in FP32 (evita blur/artefatti)
+        with torch.cuda.amp.autocast(enabled=False):
+            batch_images = model.decode_first_stage(samples, **additional_decode_kwargs).float()
         batch_variants.append(batch_images)
     ## variants, batch, c, t, h, w
     batch_variants = torch.stack(batch_variants)
@@ -344,7 +333,7 @@ def run_inference(args, gpu_num, gpu_no):
     filename_list_rank = [filename_list[i] for i in indices]
 
     start = time.time()
-    with torch.no_grad():
+    with torch.no_grad(), torch.cuda.amp.autocast():
         for idx, indice in tqdm(enumerate(range(0, len(prompt_list_rank), args.bs)), desc='Sample Batch'):
             prompts = prompt_list_rank[indice:indice+args.bs]
             videos = data_list_rank[indice:indice+args.bs]
@@ -355,7 +344,7 @@ def run_inference(args, gpu_num, gpu_no):
                 videos = videos.unsqueeze(0).to("cuda")
 
             batch_samples = image_guided_synthesis(model, prompts, videos, noise_shape, args.n_samples, args.ddim_steps, args.ddim_eta, \
-                args.unconditional_guidance_scale, args.cfg_img, args.frame_stride, args.text_input, args.multiple_cond_cfg, args.loop, args.interp, args.timestep_spacing, args.guidance_rescale, full_img_cond=args.full_img_cond)
+                args.unconditional_guidance_scale, args.cfg_img, args.frame_stride, args.text_input, args.multiple_cond_cfg, args.loop, args.interp, args.timestep_spacing, args.guidance_rescale)
 
             ## save each example individually
             for nn, samples in enumerate(batch_samples):
@@ -582,12 +571,11 @@ def build_argparser():
     parser.add_argument("--perframe_ae", action='store_true', default=False)
     parser.add_argument("--loop", action='store_true', default=False)
     parser.add_argument("--interp", action='store_true', default=False)
-    parser.add_argument("--full_img_cond", action='store_true', default=False, help="Usa condizione immagine su tutti i frame anche con --interp/--loop")
     # LoRA (unificato)
     parser.add_argument("--lora_path", type=str, default=None, help="Path ai pesi LoRA (.safetensors o .pt)")
-    parser.add_argument("--lora_rank", type=int, default=8)
-    parser.add_argument("--lora_alpha", type=float, default=1.0)
-    parser.add_argument("--lora_scale", type=float, default=1.0)  # <--- nuovo
+    parser.add_argument("--lora_rank", type=int, default=16)
+    parser.add_argument("--lora_alpha", type=float, default=32.0)
+    parser.add_argument("--lora_scale", type=float, default=8.0)
     return parser
 
 def main():

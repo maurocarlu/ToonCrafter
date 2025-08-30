@@ -246,9 +246,9 @@ class ColabMangaToonCrafterRunner:
                 "--video_length", str(custom_params['video_length']),
                 "--frame_stride", str(custom_params['frame_stride']),
                 "--timestep_spacing", "uniform",
-                "--guidance_rescale", str(custom_params['guidance_rescale'])
-                #"--perframe_ae",
-                #"--interp"
+                "--guidance_rescale", str(custom_params['guidance_rescale']),
+                "--perframe_ae",
+                "--interp"
             ]
             if lora_path:
                 cmd += ["--lora_path", str(lora_path), "--lora_scale", str(lora_scale)]
