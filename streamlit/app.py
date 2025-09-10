@@ -47,15 +47,15 @@ def setup_environment():
                 os.system("wget -q https://huggingface.co/camenduru/ToonCrafter/resolve/main/model.ckpt -P ./checkpoints/tooncrafter_512_interp_v1/")
 
     # 2. Setup di RIFE
-    rife_dir = Path("./ECCV2022-RIFE")
+    rife_dir = (TOON_ROOT / "ECCV2022-RIFE").resolve()
     rife_weights_path = rife_dir / "train_log" / "flownet.pkl"
     if not rife_weights_path.exists():
         with st.spinner("Setup di RIFE in corso..."):
-            os.system(f"git clone -q https://github.com/hzwer/ECCV2022-RIFE.git {rife_dir}")
+            os.system(f"git clone -q https://github.com/hzwer/ECCV2022-RIFE.git \"{rife_dir}\"")
             gdrive_id = "1APIzVeI-4ZZCEuIRE1m6WYfSCaOsi_7_"
             zip_path = rife_dir / "train_log.zip"
-            os.system(f"gdown --id {gdrive_id} -O {str(zip_path)}")
-            os.system(f"unzip -q -o {str(zip_path)} -d {str(rife_dir)}")
+            os.system(f"gdown --id {gdrive_id} -O \"{str(zip_path)}\"")
+            os.system(f"unzip -q -o \"{str(zip_path)}\" -d \"{str(rife_dir)}\"")
             os.remove(zip_path)
 
     # NEW: Patch NumPy aliases per scikit-video (np.float, np.int, …)
@@ -244,7 +244,10 @@ if st.button("🚀 Genera Animazione", use_container_width=True):
                         cmd_rife = [sys.executable, str(TOON_ROOT / "ECCV2022-RIFE" / "inference_video.py"),
                                     "--exp", "1", "--video", str(final_video_path), "--output", str(rife_out),
                                     "--fp16", "--fps", str(final_fps)]
-                        result_rife = subprocess.run(cmd_rife, capture_output=True, text=True, cwd=str(TOON_ROOT / "ECCV2022-RIFE"))
+                        # Forza il caricamento di sitecustomize dalla cartella di RIFE
+                        env = os.environ.copy()
+                        env["PYTHONPATH"] = str((TOON_ROOT / "ECCV2022-RIFE").resolve()) + os.pathsep + env.get("PYTHONPATH","")
+                        result_rife = subprocess.run(cmd_rife, capture_output=True, text=True, cwd=str(TOON_ROOT / "ECCV2022-RIFE"), env=env)
                         if result_rife.returncode == 0 and rife_out.exists():
                             final_video_path = rife_out
                             st.success("✅ Fluidità aumentata!")
