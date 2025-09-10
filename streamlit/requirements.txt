@@ -19,6 +19,7 @@ safetensors
 kornia==0.7.2
 timm
 PyYAML==6.0.2
+av==12.2.0
 
 # --- RIFE & Utility Dependencies ---
 scikit-video
