@@ -16,6 +16,8 @@ torchmetrics==1.2.1
 xformers==0.0.32.post2
 open-clip-torch==2.22.0
 safetensors
+kornia==0.7.2
+PyYAML==6.0.2
 
 # --- RIFE & Utility Dependencies ---
 scikit-video
@@ -28,6 +30,14 @@ tqdm
 rembg==2.0.56
 onnxruntime==1.17.3
 scikit-image  
+
+# --- Video / IO ---
+imageio>=2.31.0
+imageio-ffmpeg
+moviepy
+opencv-python-headless==4.8.1.78
+Pillow>=9.5.0
+tqdm
 
 # --- Streamlit & ngrok ---
 streamlit
