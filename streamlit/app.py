@@ -19,6 +19,13 @@ except ImportError:
     st.error("ERRORE CRITICO: `panelPreProcessing.py` non trovato. Assicurati che si trovi in `scriptPanelManga/`.")
     st.stop()
 
+# Prova a importare il runner (se esiste) per evitare il bug timesteps senza toccare inference.py
+try:
+    from colab_tooncrafter_runner import ColabMangaToonCrafterRunner
+    HAVE_RUNNER = True
+except Exception:
+    HAVE_RUNNER = False
+
 # --- Funzioni di Setup (con cache per efficienza) ---
 @st.cache_resource
 def setup_environment():
@@ -119,29 +126,72 @@ if st.button("🚀 Genera Animazione", use_container_width=True):
                     img2.save(img2_path)
 
                 (segment_input_dir / "prompt.txt").write_text(prompt)
+                # compat: alcune pipeline leggono "prompts.txt"
+                (segment_input_dir / "prompts.txt").write_text(prompt)
 
                 with st.spinner(f"ToonCrafter sta generando il segmento {i+1}... (può richiedere 2-3 minuti)"):
-                    cmd_tc = [
-                        "python", "./scripts/evaluation/inference.py",
-                        "--config", "./configs/inference_512_v1.0.yaml",
-                        "--ckpt_path", "./checkpoints/tooncrafter_512_interp_v1/model.ckpt",
-                        "--prompt_dir", str(segment_input_dir),
-                        "--savedir", str(segment_output_dir),
-                        "--ddim_steps", str(ddim_steps),
-                        "--frame_stride", str(frame_stride),
-                        "--unconditional_guidance_scale", "7.5", # Fisso per stabilità
-                        "--video_length", "16",
-                        "--interp", "--text_input",
-                    ]
-                    if use_lora and Path(lora_path_input).exists():
-                        cmd_tc.extend(["--lora_path", lora_path_input, "--lora_scale", str(lora_scale)])
-                    
-                    result_tc = subprocess.run(cmd_tc, capture_output=True, text=True)
-                    
+                    generated_ok = False
+                    segment_output_dir.mkdir(exist_ok=True, parents=True)
+
+                    if HAVE_RUNNER:
+                        # Usa il runner Python (gestisce i timesteps correttamente)
+                        try:
+                            runner = ColabMangaToonCrafterRunner(str(Path(".").resolve()))
+                            params = {
+                                "frame_stride": int(frame_stride),
+                                "ddim_steps": int(ddim_steps),
+                                "unconditional_guidance_scale": 7.5,
+                                "guidance_rescale": 0.0,
+                                "video_length": 16,
+                            }
+                            lora_kwargs = {}
+                            if use_lora and Path(lora_path_input).exists():
+                                lora_kwargs = {"lora_path": lora_path_input, "lora_scale": float(lora_scale)}
+
+                            base_name = "input"  # perché i file sono input_frame1.png / input_frame3.png
+                            ok = runner.run_custom_parameters_conversion(
+                                base_name=base_name,
+                                prompt=prompt,
+                                custom_params=params,
+                                output_dir=str(segment_output_dir),
+                                input_dir=str(segment_input_dir),
+                                **lora_kwargs,
+                            )
+                            generated_ok = bool(ok)
+                        except Exception as e:
+                            st.warning(f"Runner non disponibile o errore: uso fallback inference.py. Dettagli: {e}")
+                            generated_ok = False  # usiamo il fallback sotto
+
+                    if not generated_ok:
+                        # Fallback CLI: chiama direttamente inference.py
+                        cmd_tc = [
+                            "python", "./scripts/evaluation/inference.py",
+                            "--config", "./configs/inference_512_v1.0.yaml",
+                            "--ckpt_path", "./checkpoints/tooncrafter_512_interp_v1/model.ckpt",
+                            "--prompt_dir", str(segment_input_dir),
+                            "--savedir", str(segment_output_dir),
+                            "--ddim_steps", str(ddim_steps),
+                            "--frame_stride", str(frame_stride),
+                            "--unconditional_guidance_scale", "7.5",
+                            "--video_length", "16",
+                            "--interp", "--text_input",
+                        ]
+                        if use_lora and Path(lora_path_input).exists():
+                            cmd_tc.extend(["--lora_path", lora_path_input, "--lora_scale", str(lora_scale)])
+
+                        result_tc = subprocess.run(cmd_tc, capture_output=True, text=True)
+                        if result_tc.returncode != 0:
+                            st.error(f"Errore generazione segmento {i+1}.")
+                            st.code(result_tc.stderr or result_tc.stdout)
+                            break
+
                     found = list((segment_output_dir / "samples_separate").glob("*.mp4"))
-                    if not found or result_tc.returncode != 0:
-                        st.error(f"Errore generazione segmento {i+1}."); st.code(result_tc.stderr); break
-                    
+                    if not found:
+                        st.error(f"Errore generazione segmento {i+1}: nessun MP4 trovato.")
+                        if not HAVE_RUNNER:
+                            st.caption("Suggerimento: abilita il runner Python in scriptPanelManga per maggiore compatibilità.")
+                        break
+
                     generated_segments.append(str(found[0]))
                     st.success(f"✅ Segmento {i+1} generato!")
             

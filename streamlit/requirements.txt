@@ -17,6 +17,7 @@ xformers==0.0.32.post2
 open-clip-torch==2.22.0
 safetensors
 kornia==0.7.2
+timm
 PyYAML==6.0.2
 
 # --- RIFE & Utility Dependencies ---
