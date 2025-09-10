@@ -58,6 +58,21 @@ def setup_environment():
             os.system(f"unzip -q -o {str(zip_path)} -d {str(rife_dir)}")
             os.remove(zip_path)
 
+    # NEW: Patch NumPy aliases per scikit-video (np.float, np.int, …)
+    try:
+        sitecustomize_path = rife_dir / "sitecustomize.py"
+        if not sitecustomize_path.exists():
+            sitecustomize_path.write_text(
+                "import numpy as _np\n"
+                "if not hasattr(_np,'float'): _np.float = float\n"
+                "if not hasattr(_np,'int'): _np.int = int\n"
+                "if not hasattr(_np,'complex'): _np.complex = complex\n"
+                "if not hasattr(_np,'bool'): _np.bool = bool\n"
+                "if not hasattr(_np,'object'): _np.object = object\n"
+            )
+    except Exception as _e:
+        st.warning(f"Impossibile creare patch NumPy per RIFE: {_e}")
+
     st.success("Ambiente pronto!")
     return True
 
