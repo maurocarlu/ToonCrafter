@@ -228,8 +228,12 @@ class ColabMangaToonCrafterRunner:
             name = f"tooncrafter_{base_name}_seed{seed}"
             final_output_dir = os.path.join(output_dir, name)
             
+            # ✅ Interprete portabile
+            python_exec = sys.executable or ("python" if os.name == "nt" else "python3")
+            print(f"🐍 Interpreter: {python_exec}")
+
             cmd = [
-                "python3", "-u", str(inference_script),
+                python_exec, "-u", str(inference_script),
                 "--seed", str(seed),
                 "--ckpt_path", str(checkpoint),
                 "--config", str(base_config),
